@@ -1419,6 +1419,10 @@ async function main() {
   const platform = cfg.platform === 'discord'
     ? (await import('./platform/discord.js')).createDiscordPlatform({ cfg, log })
     : createQQPlatform({ cfg, log, configPath: path.join(ROOT, 'config.json') });
+  // 平台没有拍一拍（Discord）时，poke 不是合法的唤醒条件：不写入、不加载，唤醒提示、
+  // chat_get_prompt 与各工具回给模型的唤醒配置里都不出现；也免得「只剩 poke」的无限期潜水
+  // 被防永眠检查当成可唤醒，实际却永远等不到拍一拍。
+  const platformHasPoke = platformSupportsToolFlag(cfg.platform, 'sendPoke');
 
   // ── 群聊黑话/网络用语学习（slang） ──────────────────────────────────────
   let slangEntries = [];
@@ -4466,7 +4470,9 @@ async function main() {
             },
             role: { name: roleState.role ?? null, hint: currentMode === 'reserved2' ? currentRoleHintV2() : currentRoleHint() },
             recommended: cfg.socialV2?.provideRecommendations === false ? null : {
-              wake: cfg.socialV2?.wake ?? {},
+              wake: platformHasPoke
+                ? (cfg.socialV2?.wake ?? {})
+                : Object.fromEntries(Object.entries(cfg.socialV2?.wake ?? {}).filter(([k]) => k !== 'recommendedPoke')),
               send: cfg.socialV2?.send ?? {},
               wait: cfg.socialV2?.wait ?? {},
               proactive: cfg.socialV2?.proactive ?? {}
@@ -4618,7 +4624,7 @@ async function main() {
               nameMention: normalizeTriggerBool('nameMention', current.triggers.nameMention === true),
               question: normalizeTriggerBool('question', current.triggers.question === true),
               anyMessage: normalizeTriggerBool('anyMessage', current.triggers.anyMessage === true),
-              poke: normalizeTriggerBool('poke', current.triggers.poke === true),
+              ...(platformHasPoke ? { poke: normalizeTriggerBool('poke', current.triggers.poke === true) } : {}),
               keywords: nextKeywords
             },
             batchWindowMs: Number.isFinite(Number(input.batchWindowMs)) && Number(input.batchWindowMs) >= 1000
@@ -4670,7 +4676,7 @@ async function main() {
             next.triggers.probability = Math.min(1, Math.max(0, Number(next.triggers.probability) || 0));
           }
           // 归一化拍一拍触发（只接受布尔，防脏字符串被当成 true）
-          if (input.triggers && typeof input.triggers === 'object' && 'poke' in input.triggers) {
+          if (platformHasPoke && input.triggers && typeof input.triggers === 'object' && 'poke' in input.triggers) {
             next.triggers.poke = input.triggers.poke === true;
           }
           // 归一化“指定成员”触发：只保留正整数 QQ 号，去重，限制数量；
@@ -4685,7 +4691,7 @@ async function main() {
             const tr = next.triggers ?? {};
             const hasTrigger = tr.atMention || tr.nameMention || tr.poke || (Array.isArray(tr.keywords) && tr.keywords.length > 0) || tr.question || tr.anyMessage || (Number(tr.probability) > 0) || (Array.isArray(tr.speakerIds) && tr.speakerIds.length > 0);
             if (!hasTrigger) {
-              sendJson({ ok: false, error: '无限期潜水必须至少保留一个唤醒条件（@/名字/拍一拍/关键词/提问/anyMessage/概率>0），否则 AI 可能永眠' }, 400);
+              sendJson({ ok: false, error: `无限期潜水必须至少保留一个唤醒条件（@/名字/${platformHasPoke ? '拍一拍/' : ''}关键词/提问/anyMessage/概率>0），否则 AI 可能永眠` }, 400);
               return;
             }
           }
@@ -7977,7 +7983,7 @@ async function main() {
   // 旧写法 `{...current.triggers, ...inputTriggers}` 会把模型传来的任意键原样并入、
   // 持久化、再由 chat_get_prompt 原样回给模型（每次请求都带着），等于给了一个
   // 「用 1MB 垃圾键把状态文件与每轮 prompt 撑大」的入口。
-  const WAKE_TRIGGER_KEYS = Object.freeze(['atMention', 'nameMention', 'speakerIds', 'keywords', 'question', 'poke', 'anyMessage', 'probability']);
+  const WAKE_TRIGGER_KEYS = Object.freeze(['atMention', 'nameMention', 'speakerIds', 'keywords', 'question', ...(platformHasPoke ? ['poke'] : []), 'anyMessage', 'probability']);
   function pickWakeTriggersV2(source, fallback = {}) {
     const out = {};
     const src = source && typeof source === 'object' ? source : {};
@@ -8010,7 +8016,7 @@ async function main() {
         speakerIds: [],
         keywords: Array.isArray(w.recommendedKeywords) ? w.recommendedKeywords.map(String) : [],
         question: w.recommendedQuestion !== false,
-        poke: w.recommendedPoke !== false,
+        ...(platformHasPoke ? { poke: w.recommendedPoke !== false } : {}),
         anyMessage: defaultMode === 'active',
         probability: Math.min(1, Math.max(0, Number(w.recommendedProbability) || 0))
       },
