@@ -8600,10 +8600,10 @@ async function main() {
   }
 
   // 启动阶段的"明确与 AI 有关"：@ / 提到名字 / 必回关键词 / 管理员私聊
-  function isDirectAddress(textContent, event, kind) {
+  function isDirectAddress(textContent, msg, kind) {
     if (kind !== 'group') return true;
     const lower = String(textContent ?? '').toLowerCase();
-    const selfId = String(event?.self_id ?? '');
+    const selfId = String(msg?.selfId ?? '');
     if (selfId && lower.includes('@' + selfId)) return true;
     if (selfNickname && (lower.includes('@' + selfNickname) || lower.includes(selfNickname))) return true;
     for (const kw of (cfg.social?.mustReplyKeywords ?? [])) {
@@ -9371,50 +9371,47 @@ async function main() {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
       }
-      const raw = await platform.getMessage(numericId);
-      if (!raw) {
+      const quoted = await platform.getMessage(numericId);
+      if (!quoted) {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
       }
       // 消息归属校验：防止跨会话读取其他群/私聊消息。
-      // 若网关返回的 raw 对象连归属字段都缺失，则视为无法确认归属，拒绝返回内容。
+      // 若读回的消息连归属字段都缺失，则视为无法确认归属，拒绝返回内容。
       if (kind === 'group') {
-        const rawGroup = raw.group_id ?? raw.groupId;
-        if (rawGroup == null) {
+        if (quoted.kind !== 'group') {
           replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
           return null;
         }
-        if (String(rawGroup) !== String(convId)) {
+        if (quoted.conversationId !== String(convId)) {
           replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
           return null;
         }
       } else {
-        const rawUser = raw.user_id ?? raw.userId ?? raw.sender?.user_id;
-        const rawGroup = raw.group_id ?? raw.groupId;
+        const quotedUser = quoted.sender.userId;
         // 私聊消息必须同时满足：没有群归属，且发送者匹配。防止用群消息 id 跨会话读取。
-        if (rawGroup != null) {
+        if (quoted.kind === 'group') {
           replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
           return null;
         }
-        if (rawUser == null) {
+        if (quotedUser == null) {
           replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
           return null;
         }
-        if (String(rawUser) !== String(convId) && !(selfId != null && String(rawUser) === String(selfId))) {
+        if (quotedUser !== String(convId) && !(selfId != null && quotedUser === String(selfId))) {
           replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
           return null;
         }
       }
-      const sender = raw.sender?.card || raw.sender?.nickname || String(raw.sender?.user_id ?? raw.user_id ?? '未知');
-      const text = await segmentsToText(raw.message ?? [], {
+      const sender = quoted.sender.card || quoted.sender.nickname || (quoted.sender.userId ?? '未知');
+      const text = await segmentsToText(quoted.segments, {
         resolveAtName: kind === 'group' ? (qq) => resolveGroupMemberName(convId, qq) : null,
         includeReply: false
       });
-      const senderUserId = raw.sender?.user_id ?? raw.user_id ?? null;
       const info = {
         sender: String(sender ?? ''),
         text: String(text ?? '').slice(0, 200),
-        userId: senderUserId != null ? String(senderUserId) : null
+        userId: quoted.sender.userId
       };
       replyInfoCache.set(cacheKey, { info, ts: Date.now() });
       return info;
@@ -9721,12 +9718,12 @@ async function main() {
     return text;
   }
 
-  function evaluateWakeTriggerV2(key, st, event, kind, textContent, plainContent, quoteTargetIsSelf) {
+  function evaluateWakeTriggerV2(key, st, msg, kind, textContent, plainContent, quoteTargetIsSelf) {
     if (kind === 'private') return 'private';
     const tr = st.wakeConfig?.triggers ?? {};
     if (tr.anyMessage) return 'anyMessage';
     if (tr.atMention) {
-      const atSelf = Array.isArray(event?.message) && event.message.some((seg) => seg?.type === 'at' && String(seg.data?.qq) === String(event?.self_id ?? ''));
+      const atSelf = Array.isArray(msg?.segments) && msg.segments.some((seg) => seg?.type === 'at' && String(seg.data?.qq) === String(msg?.selfId ?? ''));
       if (atSelf || quoteTargetIsSelf) return 'atMention';
     }
     if (tr.nameMention && selfNickname) {
@@ -9750,9 +9747,9 @@ async function main() {
     }
     if (tr.question && isDirectedAtAi(plainContent)) return 'question';
     if (Array.isArray(tr.speakerIds) && tr.speakerIds.length) {
-      const speakerId = String(event?.user_id ?? event?.sender?.user_id ?? '');
+      const speakerId = String(msg?.sender?.userId ?? '');
       if (speakerId && tr.speakerIds.some((id) => String(id) === speakerId)) {
-        const senderLabel = event?.sender?.card || event?.sender?.nickname || speakerId;
+        const senderLabel = msg?.sender?.card || msg?.sender?.nickname || speakerId;
         return `speaker:${senderLabel}`;
       }
     }
@@ -10498,25 +10495,26 @@ async function main() {
   }
 
   // QQ 消息 → DSH prompt
-  async function handleIncoming(kind, id, event, cfg) {
+  async function handleIncoming(msg, cfg) {
+    const { kind, conversationId: id } = msg;
     const key = convKey(kind, id);
     if (!modeAllowed(key, kind, id, cfg, currentMode)) {
-      log(`忽略未授权会话 ${key}（当前模式 ${currentMode}，来自 ${event.user_id}）`);
+      log(`忽略未授权会话 ${key}（当前模式 ${currentMode}，来自 ${msg.sender.userId}）`);
       return;
     }
     const resolveAtName = async (qq) => {
       // 只有群聊才需要把 @QQ号 解析成群名片/昵称；私聊没有群成员概念
       if (kind !== 'group') return null;
-      return resolveGroupMemberName(event.group_id, qq);
+      return resolveGroupMemberName(id, qq);
     };
-    const resolveReply = (messageId) => resolveReplyInfo(kind, id, messageId, event.self_id);
+    const resolveReply = (messageId) => resolveReplyInfo(kind, id, messageId, msg.selfId);
     // textContent 带引用对象信息，供 DSH 判断“这句话在对谁说”；
     // plainContent 只保留当前消息自己的文字，用于命令/指向性判断，避免被引用原文干扰。
-    const textContent = await segmentsToText(event.message ?? [], { resolveAtName, resolveReply });
-    const plainContent = await segmentsToText(event.message ?? [], { resolveAtName, includeReply: false });
-    const mediaList = extractMediaFromSegments(event.message ?? []);
-    const messageRef = String(event.message_id ?? event.msg_id ?? event.message_seq ?? '');
-    const seqRef = event.message_seq != null ? String(event.message_seq) : '';
+    const textContent = await segmentsToText(msg.segments, { resolveAtName, resolveReply });
+    const plainContent = await segmentsToText(msg.segments, { resolveAtName, includeReply: false });
+    const mediaList = extractMediaFromSegments(msg.segments);
+    const messageRef = String(msg.messageId ?? msg.messageSeq ?? '');
+    const seqRef = msg.messageSeq ?? '';
     const refsToStore = [...new Set([messageRef, seqRef].filter(Boolean))];
     if (refsToStore.length > 0 && mediaList.length > 0) {
       let mediaByRef = messageMediaStore.get(key);
@@ -10534,10 +10532,10 @@ async function main() {
     }
     // 引用对象是机器人自己时，视为直接对 AI 说（即使当前文字没有 @/关键词）。
     // 因此必须先解析 quoteTargetIsSelf 再做空文本过滤，避免“只引用不附文”被漏掉。
-    const quoteTargetIsSelf = await isQuoteTargetSelf(event.message ?? [], kind, id, event.self_id);
+    const quoteTargetIsSelf = await isQuoteTargetSelf(msg.segments, kind, id, msg.selfId);
     if (!isSessionAllowedInCurrentMode(key)) return;
     if (!plainContent && !quoteTargetIsSelf) return;
-    const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
+    const isOwner = String(msg.sender.userId) === String(cfg.ownerQQ ?? '');
     const roleState = readRoleState();
 
     // 若该会话有挂起的提问/审批，先当作回答处理（用当前消息自己的文字，不含引用原文）。
@@ -10550,7 +10548,7 @@ async function main() {
 
     // 静默模式：群友消息不投递给 agent（只记录）；管理员消息照常
     if (roleState.mode === 'silent' && !isOwner) {
-      appendActivity(`${key}（静默模式）群友 ${event.user_id}：${textContent.slice(0, 80)}`);
+      appendActivity(`${key}（静默模式）群友 ${msg.sender.userId}：${textContent.slice(0, 80)}`);
       log(`静默模式，忽略群友消息 ${key}`);
       return;
     }
@@ -10656,8 +10654,8 @@ async function main() {
 
     // 二代仿真模式（reserved2）：唤醒调度
     if (currentMode === 'reserved2') {
-      const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
-      appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, extractForwardIds(event.message ?? []));
+      const sender = kind === 'group' ? (msg.sender.card || msg.sender.nickname || String(msg.sender.userId)) : '私聊';
+      appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, msg.messageId, mediaList, msg.sender.userId, extractForwardIds(msg.segments));
       // 二代同样收集群聊黑话学习素材（AI 自主提交之外，桥接仍自动提取高频陌生词）
       if (kind === 'group') feedSlangWindow(key, sender, plainContent);
       if (socialV2.paused) {
@@ -10670,7 +10668,7 @@ async function main() {
         saveSocialV2State();
         scheduleWakeV2(key, 'bootstrap');
       } else {
-        const reason = evaluateWakeTriggerV2(key, st, event, kind, textContent, plainContent, quoteTargetIsSelf);
+        const reason = evaluateWakeTriggerV2(key, st, msg, kind, textContent, plainContent, quoteTargetIsSelf);
         if (reason) {
           scheduleWakeV2(key, reason);
         }
@@ -10681,7 +10679,7 @@ async function main() {
 
     // 黑话学习素材：只从群聊普通消息进入滚动窗口（命令/角色控制语不学；只学当前消息自己的文字，不学引用原文）
     if (kind === 'group') {
-      feedSlangWindow(key, event.sender?.card || event.sender?.nickname || String(event.user_id), plainContent);
+      feedSlangWindow(key, msg.sender.card || msg.sender.nickname || String(msg.sender.userId), plainContent);
     }
 
     // 角色扮演提示注入（仅注入给 agent，不影响群友之间的正常对话语义）
@@ -10692,15 +10690,15 @@ async function main() {
     const promptText = (roleHint ? roleHint + '\n\n' : '')
       + (isOwner ? '【管理员】' : '')
       + (kind === 'group'
-        ? `${event.sender?.card || event.sender?.nickname || String(event.user_id)}：${textContent}`
+        ? `${msg.sender.card || msg.sender.nickname || String(msg.sender.userId)}：${textContent}`
         : textContent)
       + mediaHintFor(key, messageRef, mediaList);
 
-    appendActivity(`${key} ${isOwner ? '管理员' : '群友'} ${event.sender?.nickname || event.user_id}：${textContent.slice(0, 80)}`);
+    appendActivity(`${key} ${isOwner ? '管理员' : '群友'} ${msg.sender.nickname || msg.sender.userId}：${textContent.slice(0, 80)}`);
 
     // 仿真群友模式：reserved 走状态机（观望/活跃/试探/退场）
     if (isSocialEnabled()) {
-      const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
+      const sender = kind === 'group' ? (msg.sender.card || msg.sender.nickname || String(msg.sender.userId)) : '私聊';
       appendRecentMessage(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, mediaList, messageRef); // AI 始终感知
       const st = socialState(key);
 
@@ -10743,7 +10741,7 @@ async function main() {
 
       // 启动阶段（观望）：触发条件 ① 明确对 AI 说（含引用机器人自己） ② 普通消息小概率
       // 指向性判断只基于当前消息自己的文字，不把引用原文算作“在叫 AI”
-      const direct = isDirectAddress(plainContent, event, kind) || quoteTargetIsSelf;
+      const direct = isDirectAddress(plainContent, msg, kind) || quoteTargetIsSelf;
       const randomTrigger = Math.random() < Number(cfg.social?.triggerProbability ?? 0.15);
       if (!direct && !randomTrigger) {
         appendSummary(key, sender, textContent, plainContent, isOwner, mediaList, messageRef);
@@ -10911,30 +10909,10 @@ async function main() {
   }
 
   // 二代拍一拍（notify/poke）事件处理：写入消息流并按需唤醒。
-  async function handlePokeNotice(event) {
-    if (!event || event.sub_type !== 'poke') return;
-    const selfId = event.self_id;
-    const groupId = event.group_id ?? event.groupId ?? null;
-    const senderIdRaw = event.sender_id ?? event.user_id ?? event.sender?.user_id ?? null;
-    const targetIdRaw = event.target_id ?? event.targetId ?? null;
-    const senderId = senderIdRaw != null ? String(senderIdRaw) : '';
-    const targetId = targetIdRaw != null ? String(targetIdRaw) : '';
-    // 自己发出的拍一拍不回灌给 AI（避免把“我拍了别人”当成群友事件）。
-    if (senderId && selfId != null && String(senderId) === String(selfId)) return;
-    let key;
-    let kind;
-    let id;
-    if (groupId != null) {
-      kind = 'group';
-      id = String(groupId);
-      key = convKey('group', id);
-    } else {
-      kind = 'private';
-      const peer = event.user_id ?? senderId;
-      if (!peer) return;
-      id = String(peer);
-      key = convKey('private', id);
-    }
+  // 「不是拍一拍 / 自己拍的 / 找不到会话对象」的过滤在适配层（toInboundPoke）里。
+  async function handlePokeNotice(poke) {
+    const { kind, conversationId: id, senderId, targetId, selfId } = poke;
+    const key = convKey(kind, id);
     if (!modeAllowed(key, kind, id, cfg, currentMode)) return;
     if (currentMode !== 'reserved2') {
       appendActivity(`${key} 收到拍一拍事件（非 reserved2，仅记录）：${senderId} -> ${targetId}`);
@@ -10954,9 +10932,9 @@ async function main() {
       targetId: targetId || null,
       targetIsSelf,
       isOwner,
-      groupId: groupId != null ? String(groupId) : null,
-      action: event.action,
-      suffix: event.suffix
+      groupId: kind === 'group' ? id : null,
+      action: poke.action,
+      suffix: poke.suffix
     });
     appendActivity(`${key} 拍一拍事件：${msg.text.slice(0, 80)}`);
     if (currentMode !== 'reserved2') return;
@@ -11496,17 +11474,17 @@ async function main() {
   }
 
   // QQ 侧：连接、断线自愈与上游健康都在适配层里，这里只接收消息/拍一拍事件。
-  platform.onMessage((kind, id, event) => handleIncoming(kind, id, event, cfg));
-  platform.onPoke((event) => handlePokeNotice(event));
+  platform.onMessage((msg) => handleIncoming(msg, cfg));
+  platform.onPoke((poke) => handlePokeNotice(poke));
   platform.onReady(() => {
     // 读取机器人昵称（用于社交模式"被提到"识别）；重连后也会刷新
-    platform.getLoginInfo().then((login) => {
-      if (login?.nickname) {
-        selfNickname = String(login.nickname).toLowerCase();
-        selfDisplayName = String(login.nickname).trim();
-        log(`机器人昵称: ${login.nickname}`);
+    platform.getSelfInfo().then((self) => {
+      if (self?.nickname) {
+        selfNickname = self.nickname.toLowerCase();
+        selfDisplayName = self.nickname.trim();
+        log(`机器人昵称: ${self.nickname}`);
       }
-      if (login?.user_id != null) selfUserId = String(login.user_id);
+      if (self?.userId != null) selfUserId = self.userId;
     }).catch(() => {});
   });
   // 平台尚未就绪时不阻塞桥接启动：SDK 自带后台重连，DSH 侧照常连接。

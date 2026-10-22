@@ -8,9 +8,9 @@
 //
 //   生命周期
 //     start()                     连接并开始上游健康探测；只调一次
-//     onMessage(handler)          handler(kind, id, event)：kind 为 'private' | 'group'，
-//                                 id 为会话对象（私聊对方 / 群）；机器人自己发的消息不会进来
-//     onPoke(handler)             handler(event)：拍一拍通知（平台没有这个概念就永不触发）
+//     onMessage(handler)          handler(message)：message 为 InboundMessage（见下）；
+//                                 机器人自己发的消息不会进来
+//     onPoke(handler)             handler(poke)：poke 为 InboundPoke（见下）；平台没有这个概念就永不触发
 //     onReady(handler)            每次连接成功后触发（重连也会）
 //     healthSnapshot()            上游健康快照，供 /api/status 给操作者看
 //   发送
@@ -20,22 +20,103 @@
 //     sendVoice(kind, id, file)   一条语音（本机音频文件路径）；返回网关的 data
 //     poke(kind, id, userId)      拍一拍
 //   查询
-//     getLoginInfo()  getMessage(messageId)  getImage(file)  getFace(faceId)  getForwardMessage(id)
+//     getSelfInfo()               机器人自己：{ userId, nickname }（userId 可能为 null）
+//     getMessage(messageId)       按 id 读回一条消息：InboundMessage 或 null（引用解析用）
+//     getImage(file)  getFace(faceId)  getForwardMessage(id)
 //     getGroupMemberList(groupId)  getGroupMemberInfo(groupId, userId)
 //     getGroupMemberListWithFallback(groupId)   WS 失败时改走 HTTP；返回网关响应信封
 //     confirmVoiceSent(messageId)  voiceToText(messageId)
 //   收藏表情（QQ 独有；其它平台可以直接抛「不支持」）
 //     fetchStickerLibrary(count)  addSticker(image)  setStickerRemark(emojiId, desc)
 //
-// ⚠️ 这一版只抽出了「传输层」：事件对象与查询结果仍是 OneBot v11 的形状（user_id /
-// group_id / message 段数组 / { status, retcode, data } 信封），会话 key 也仍是
-// `group:<数字>` / `private:<数字>`。入站消息的正规化与 ID 格式是之后的步骤。
+// 入站格式（所有 id 都是字符串）：
+//
+//   InboundMessage {
+//     kind: 'private' | 'group',
+//     conversationId,             私聊对方 / 群
+//     messageId,                  平台消息 id（引用、看图、收藏用）；可能为 null
+//     messageSeq,                 QQ 的 message_seq（只作媒体索引的别名）；其它平台给 null
+//     sender: { userId, nickname, card },      card 为群名片（服务器内昵称），可为空串
+//     selfId,                     机器人自己的 id；可能为 null
+//     segments,                   消息内容：OneBot v11 消息段数组（见下）
+//   }
+//   InboundPoke { kind, conversationId, senderId, targetId, selfId, action, suffix }
+//
+//   消息内容沿用 OneBot v11 消息段，bridge.js 认得的段：text{text}、at{qq}（qq='all' 为
+//   @全体）、reply{id}、image{file,url,sub_type,summary,emoji_id,emoji_package_id,key}、
+//   mface{summary,…}、face{id}、record、video、file{name}、json、markdown{text|content}、
+//   forward{id}。其它平台的适配层把自己的消息转成这些段即可。
+//
+// ⚠️ 查询结果（成员、合并转发、图片、表情、收藏表情）仍是 OneBot v11 的形状，会话 key 也
+// 仍是 `group:<数字>` / `private:<数字>`。ID 格式是下一步。
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } from '../snowluma-conn.js';
 
 // 防止底层网关把文本中的 [CQ: 当作 CQ 码解析：替换为全角冒号。
 function escapeCqText(text) {
   return String(text ?? '').replace(/\[CQ:/gi, '[CQ：');
+}
+
+// ── 入站正规化：OneBot 事件 → 桥接内部格式 ─────────────────────────────────
+// 消息内容原样保留（OneBot 消息段）；这里只把「谁、在哪、哪一则、机器人是谁」整理成统一字段，
+// 各网关实现的字段差异（msg_id / message_seq、groupId、sender_id、target_id…）都在这里消化。
+const idOrNull = (value) => (value === undefined || value === null ? null : String(value));
+
+/**
+ * OneBot 消息事件（或 get_msg 读回的消息）→ InboundMessage。
+ * kind 省略时按有没有群号判断（get_msg 的返回不带「从哪个回调来」的信息）。
+ */
+export function toInboundMessage(event, kind = null) {
+  const groupId = event?.group_id ?? event?.groupId;
+  const userId = idOrNull(event?.user_id ?? event?.userId ?? event?.sender?.user_id);
+  const resolvedKind = kind ?? (groupId != null ? 'group' : 'private');
+  return {
+    kind: resolvedKind,
+    conversationId: resolvedKind === 'group' ? idOrNull(groupId) : userId,
+    messageId: idOrNull(event?.message_id ?? event?.msg_id),
+    messageSeq: idOrNull(event?.message_seq),
+    sender: {
+      userId,
+      nickname: String(event?.sender?.nickname ?? ''),
+      card: String(event?.sender?.card ?? '')
+    },
+    selfId: idOrNull(event?.self_id),
+    // 有些 OneBot 实现直接把纯文本消息放在 message 字段里（string）；原样交给 segmentsToText 兼容。
+    segments: event?.message ?? []
+  };
+}
+
+/** OneBot notify/poke 通知 → InboundPoke；不是拍一拍、是自己拍的、或找不到会话对象时返回 null。 */
+export function toInboundPoke(event) {
+  if (!event || event.sub_type !== 'poke') return null;
+  const selfId = event.self_id;
+  const groupId = event.group_id ?? event.groupId ?? null;
+  const senderIdRaw = event.sender_id ?? event.user_id ?? event.sender?.user_id ?? null;
+  const targetIdRaw = event.target_id ?? event.targetId ?? null;
+  const senderId = senderIdRaw != null ? String(senderIdRaw) : '';
+  const targetId = targetIdRaw != null ? String(targetIdRaw) : '';
+  // 自己发出的拍一拍不回灌给 AI（避免把“我拍了别人”当成群友事件）。
+  if (senderId && selfId != null && String(senderId) === String(selfId)) return null;
+  let kind;
+  let conversationId;
+  if (groupId != null) {
+    kind = 'group';
+    conversationId = String(groupId);
+  } else {
+    const peer = event.user_id ?? senderId;
+    if (!peer) return null;
+    kind = 'private';
+    conversationId = String(peer);
+  }
+  return {
+    kind,
+    conversationId,
+    senderId,
+    targetId,
+    selfId: idOrNull(selfId),
+    action: event.action,
+    suffix: event.suffix
+  };
 }
 
 const HTTP_426_HINT = '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口）';
@@ -140,12 +221,18 @@ export function createQQPlatform({ cfg, log, configPath }) {
   }
 
   // ── 查询 ───────────────────────────────────────────────────────────────────
-  function getLoginInfo() {
-    return bot.getLoginInfo();
+  async function getSelfInfo() {
+    const login = await bot.getLoginInfo();
+    if (!login) return null;
+    return {
+      userId: idOrNull(login.user_id),
+      nickname: login.nickname ? String(login.nickname) : ''
+    };
   }
 
-  function getMessage(messageId) {
-    return bot.getMessage(messageId);
+  async function getMessage(messageId) {
+    const raw = await bot.getMessage(messageId);
+    return raw ? toInboundMessage(raw) : null;
   }
 
   function getImage(file) {
@@ -498,15 +585,18 @@ export function createQQPlatform({ cfg, log, configPath }) {
       // 统一按字符串比较：网关可能把 id 序列化成 number/string 混用，
       // 用 `===` 漏掉自己发的消息会进入正常处理（reserved2 下 AI 会回答自己 / chat 下可能回复循环）。
       if (String(event?.user_id ?? '') === String(event?.self_id ?? '')) return;
-      try { await messageHandler?.('private', event.user_id, event); } catch (error) { log('处理私聊消息出错:', error?.message ?? error); }
+      try { await messageHandler?.(toInboundMessage(event, 'private')); } catch (error) { log('处理私聊消息出错:', error?.message ?? error); }
     });
     bot.onGroupMessage(async (event) => {
       if (String(event?.sender?.user_id ?? '') === String(event?.self_id ?? '')
         || String(event?.user_id ?? '') === String(event?.self_id ?? '')) return;
-      try { await messageHandler?.('group', event.group_id, event); } catch (error) { log('处理群消息出错:', error?.message ?? error); }
+      try { await messageHandler?.(toInboundMessage(event, 'group')); } catch (error) { log('处理群消息出错:', error?.message ?? error); }
     });
     bot.onNotice('notify', async (event) => {
-      try { await pokeHandler?.(event); } catch (error) { log('处理拍一拍事件出错:', error?.message ?? error); }
+      try {
+        const poke = toInboundPoke(event);
+        if (poke) await pokeHandler?.(poke);
+      } catch (error) { log('处理拍一拍事件出错:', error?.message ?? error); }
     });
 
     // ── 上游健康：任何事件包都算「SnowLuma 还活着」，心跳还额外带接收链路健康度 ──
@@ -614,7 +704,7 @@ export function createQQPlatform({ cfg, log, configPath }) {
     sendMessage,
     sendVoice,
     poke,
-    getLoginInfo,
+    getSelfInfo,
     getMessage,
     getImage,
     getFace,

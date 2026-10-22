@@ -141,7 +141,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   let source = stripImports(fs.readFileSync(path.join(root, 'src/bridge.js'), 'utf8'));
   source = source.replaceAll('import.meta.url', JSON.stringify(pathToFileURL(path.join(temp, 'src/bridge.js')).href));
   source = source.slice(0, source.indexOf("process.on('SIGINT'"));
-  source = source.replace('  platform.onMessage((kind, id, event) => handleIncoming(kind, id, event, cfg));', `
+  source = source.replace('  platform.onMessage((msg) => handleIncoming(msg, cfg));', `
   return {
     ensureSession, ensureSlangLearnerSession, resolvePresetName, deliverPrompt, drainPromptQueue,
     sendToQQ, sendStickerV2, handleIncoming, startConsoleServer, cfg, state, api, promptQueues,
@@ -154,6 +154,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     initialPrompts, initialPromptMaxChars,
     extractMediaFromSegments, segmentsToText, fetchOneBotImage, fetchMediaData, resolveMediaList,
     emojiCdnCandidates, getImageDimensions, acceptImageBuffer, MAX_MEDIA_BYTES, bot: platform.client,
+    // 入站正规化（适配层导出）：测试可以把 OneBot 事件原样送进 handleIncoming。
+    toInboundMessage, toInboundPoke,
     isConversationBusyV2, v2TurnStartAt, turnLeaseNoted, TURN_BUSY_LEASE_MS,
     settingFromDshNamespace, selfIdentityTextV2, buildWakeReminderPromptV2,
     getMode() { return currentMode; },
@@ -170,7 +172,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     setPresets(value) { dshPresetIds = value; dshDefaultPreset = 'standard'; },
     resetEpoch() { sessionEpoch++; },
   };
-  platform.onMessage((kind, id, event) => handleIncoming(kind, id, event, cfg));`);
+  platform.onMessage((msg) => handleIncoming(msg, cfg));`);
   const timers = new Set();
   const context = vm.createContext({
     fs, os, path, http, crypto, fileURLToPath, URL, Buffer, AbortSignal, console: { log() {}, error() {} },
@@ -218,7 +220,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   // 平台适配层也在 bridge realm 里执行：它引用的 SnowLumaWebSocketClient / text / fetch
   // 都取自上面的 context（FakeBot / fakeFetch，或调用方用 globals 覆盖的桩）。
   const platformSource = stripImports(fs.readFileSync(path.join(root, 'src/platform/qq-onebot.js'), 'utf8')).replace(/^export /gm, '');
-  vm.runInContext(`Object.assign(globalThis, (() => { ${platformSource}\nreturn { createQQPlatform }; })());`, context);
+  vm.runInContext(`Object.assign(globalThis, (() => { ${platformSource}\nreturn { createQQPlatform, toInboundMessage, toInboundPoke }; })());`, context);
   // Execute the pure model view in the bridge realm. Its plain-object checks
   // should see the same prototypes as real bridge messages, just as in Node.
   const modelViewSource = fs.readFileSync(path.join(root, 'src/qq-model-view.js'), 'utf8').replace(/^export /gm, '');

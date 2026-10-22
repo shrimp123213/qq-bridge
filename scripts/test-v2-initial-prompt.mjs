@@ -262,12 +262,13 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
     const event = {
       self_id: 999,
       user_id: 123,
+      group_id: 456,
       message_id: 4242,
       message: [{ type: 'text', data: { text: '大家好' } }],
       raw_message: '大家好',
       sender: { nickname: '测试群友', card: '测试群友' }
     };
-    await h.handleIncoming('group', '456', event, h.cfg);
+    await h.handleIncoming(h.toInboundMessage(event, 'group'), h.cfg);
     for (let i = 0; i < 100 && !h.calls.prompts.length; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(h.calls.prompts.length, 1, '首条消息应触发恰好一次 bootstrap 唤醒');
     const delivered = h.calls.prompts[0].content.map((c) => String(c?.text ?? '')).join('\n');
@@ -276,7 +277,7 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
 
     // 第二条消息（非首次唤醒）不得再注入
     const second = { ...event, message_id: 4243, message: [{ type: 'text', data: { text: '有没有人在' } }], raw_message: '有没有人在' };
-    await h.handleIncoming('group', '456', second, h.cfg);
+    await h.handleIncoming(h.toInboundMessage(second, 'group'), h.cfg);
     for (let i = 0; i < 100 && h.calls.prompts.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     if (h.calls.prompts.length >= 2) {
       const text2 = h.calls.prompts[1].content.map((c) => String(c?.text ?? '')).join('\n');
