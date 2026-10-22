@@ -351,6 +351,15 @@ const disabledTools = [];
 // 平台做不到的工具（Discord 的拍一拍、收藏表情、直连 OneBot 的旧工具…）同样不注册，
 // 能力表与桥接共用 platform/capabilities.js。
 const chatPlatform = platformOf(cfg);
+// 已注册工具的描述/参数里，也不提平台没有的东西（同样会诱导模型去用）：
+//   · 拍一拍：Discord 发不了也收不到，唤醒条件里的 poke 永远不会命中；
+//   · 语音：Discord 上是音频附件——没有「语音条」，回读看的是附件，也没有平台转写（voiceToText 恒为空）；
+//   · 成员的 card：Discord 上是服务器昵称，不叫群名片；
+//   · 消息 id：QQ 是（可能为负的）整数；Discord 是 19 位左右的 snowflake，当数字传会丢精度，只能按字符串原样传；
+//   · CQ 码是 QQ（OneBot）的消息格式，Discord 没有。
+const platformHasPoke = platformSupportsToolFlag(chatPlatform, 'sendPoke');
+const onDiscord = chatPlatform === 'discord';
+const DISCORD_MESSAGE_ID = '字符串，照抄消息里的 messageId，不要转成数字';
 {
   const registerTool = server.tool.bind(server);
   server.tool = (name, ...rest) => {
@@ -449,7 +458,7 @@ server.tool(
 // —— 预设教模型用一个永远失败的工具，等于每次都白烧一步。改成 v2 后同一个名字在两种模式下都成立。
 server.tool(
   'chat_get_group_members',
-  '列出指定群的成员（只读）：用户 id、昵称、群名片。等特定的人、要 @ 某个人、或需要确认谁在群里时用；用户 id 取返回里的 userId。只返回白名单群，且只读取桥接允许的会话。',
+  `列出指定群的成员（只读）：用户 id、昵称、${onDiscord ? '服务器昵称' : '群名片'}。等特定的人、要 @ 某个人、或需要确认谁在群里时用；用户 id 取返回里的 userId。只返回白名单群，且只读取桥接允许的会话。`,
   {
     key: z.string().describe('会话 key，格式 group:群id'),
     token: z.string().optional().describe('会话令牌（见唤醒提示中的【会话令牌】；closed-agent 模式不需要）'),
@@ -501,11 +510,11 @@ server.tool(
 
 server.tool(
   'chat_send_group_message',
-  '向指定群发送一条纯文本消息；如需引用某条消息，可传 replyToMessageId（非零整数，可为负数），可先用 chat_get_recent_messages / chat_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 chat_send_message；reserved2 下调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。',
+  `向指定群发送一条纯文本消息；如需引用某条消息，可传 replyToMessageId（${onDiscord ? DISCORD_MESSAGE_ID : '非零整数，可为负数'}），可先用 chat_get_recent_messages / chat_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 chat_send_message；reserved2 下调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。`,
   {
     groupId: z.union([z.number(), z.string()]).describe('群 id（必须在白名单内）'),
-    message: z.string().describe('消息文本，纯文本，不要用 Markdown 或 CQ 码'),
-    replyToMessageId: z.union([z.number(), z.string()]).optional().describe('要引用/回复的消息 id（非零整数，可为负数，可选）'),
+    message: z.string().describe(`消息文本，纯文本，不要用 Markdown${onDiscord ? '' : ' 或 CQ 码'}`),
+    replyToMessageId: z.union([z.number(), z.string()]).optional().describe(`要引用/回复的消息 id（${onDiscord ? DISCORD_MESSAGE_ID : '非零整数，可为负数'}，可选）`),
     token: z.string().optional().describe('二代会话令牌（reserved2 模式下必填；closed-agent 模式不需要）')
   },
   async ({ groupId, message, replyToMessageId, token }) => {
@@ -527,11 +536,11 @@ server.tool(
 
 server.tool(
   'chat_reply',
-  '在指定群里引用/回复某条消息，并发送一条文本。适合群消息很多、需要明确“我回的是哪条”时使用；replyToMessageId 是被引用消息的 id（非零整数，可能为负数），可先用 chat_get_recent_messages / chat_get_unread_messages / chat_get_message_detail 查到具体消息内容和 id。发送前桥接会校验该 id 存在且属于当前会话。二代模式下这是你正常可用的引用工具，但不要每条都引用。只有以下情况才需要引用：① 你这条消息指向的人或消息并非最新一条别人的消息（也就是你在回更早的某条）；② 你连续几句话里不同消息指代的是不同的消息或不同的人。其他情况（上下文唯一、刚在接同一条最新消息）不要引用，别让对方猜，也别为了用工具而用。reserved2 下调用时必须携带会话令牌 token。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。',
+  `在指定群里引用/回复某条消息，并发送一条文本。适合群消息很多、需要明确“我回的是哪条”时使用；replyToMessageId 是被引用消息的 id（${onDiscord ? DISCORD_MESSAGE_ID : '非零整数，可能为负数'}），可先用 chat_get_recent_messages / chat_get_unread_messages / chat_get_message_detail 查到具体消息内容和 id。发送前桥接会校验该 id 存在且属于当前会话。二代模式下这是你正常可用的引用工具，但不要每条都引用。只有以下情况才需要引用：① 你这条消息指向的人或消息并非最新一条别人的消息（也就是你在回更早的某条）；② 你连续几句话里不同消息指代的是不同的消息或不同的人。其他情况（上下文唯一、刚在接同一条最新消息）不要引用，别让对方猜，也别为了用工具而用。reserved2 下调用时必须携带会话令牌 token。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。`,
   {
     groupId: z.union([z.number(), z.string()]).describe('群 id（必须在白名单内）'),
-    replyToMessageId: z.union([z.number(), z.string()]).describe('被引用/回复的消息 id（非零整数，可为负数）'),
-    message: z.string().describe('要发送的文本，纯文本，不要用 Markdown 或 CQ 码'),
+    replyToMessageId: z.union([z.number(), z.string()]).describe(`被引用/回复的消息 id（${onDiscord ? DISCORD_MESSAGE_ID : '非零整数，可为负数'}）`),
+    message: z.string().describe(`要发送的文本，纯文本，不要用 Markdown${onDiscord ? '' : ' 或 CQ 码'}`),
     token: z.string().optional().describe('二代会话令牌（reserved2 模式下必填；closed-agent 模式不需要）')
   },
   async ({ groupId, replyToMessageId, message, token }) => {
@@ -551,11 +560,11 @@ server.tool(
 
 server.tool(
   'chat_send_private_message',
-  '向指定用户发送一条私聊消息。若提供 replyToMessageId，会以引用/回复形式发出（引用条 + 文本）。replyToMessageId 必须是非零整数消息 id（可能为负数），可先用 chat_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 chat_send_message；调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标用户必须命中系统白名单（config.json 的 allow.private），否则拒绝。',
+  `向指定用户发送一条私聊消息。若提供 replyToMessageId，会以引用/回复形式发出（引用条 + 文本）。replyToMessageId 必须是${onDiscord ? `消息 id（${DISCORD_MESSAGE_ID}）` : '非零整数消息 id（可能为负数）'}，可先用 chat_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 chat_send_message；调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标用户必须命中系统白名单（config.json 的 allow.private），否则拒绝。`,
   {
     userId: z.union([z.number(), z.string()]).describe('对方的用户 id（必须在白名单内）'),
-    message: z.string().describe('消息文本，纯文本，不要用 Markdown 或 CQ 码'),
-    replyToMessageId: z.union([z.number(), z.string()]).optional().describe('要引用/回复的消息 id（非零整数，可为负数，可选）'),
+    message: z.string().describe(`消息文本，纯文本，不要用 Markdown${onDiscord ? '' : ' 或 CQ 码'}`),
+    replyToMessageId: z.union([z.number(), z.string()]).optional().describe(`要引用/回复的消息 id（${onDiscord ? DISCORD_MESSAGE_ID : '非零整数，可为负数'}，可选）`),
     token: z.string().optional().describe('二代会话令牌（reserved2 模式下必填；closed-agent 模式不需要）')
   },
   async ({ userId, message, replyToMessageId, token }) => {
@@ -660,7 +669,7 @@ server.tool(
 
 server.tool(
   'chat_set_wake_config',
-  '设置指定会话的二代唤醒配置：mode/无限期或有限时间/提前唤醒条件（@、名字、关键词、提问、拍一拍、概率、anyMessage、指定成员）。triggers.speakerIds 是可选的“指定群友发言唤醒”：填一个或多个群友的用户 id后，只要其中任意一位在群里发言就会唤醒你；不设置则不启用。适合在等某个人回复、或某人反应慢怕错过时使用。triggers.poke 开启后，群里有人拍一拍（包括拍你或拍别人）会唤醒你。注意：每次设置潜水/下一次唤醒前需先用 chat_wait_for_messages(timeoutMs=300000) 完成一次沉睡前观察：5 分钟内没人说话可设置并沉睡；期间有人发新消息则先查看 newMessages，判断不需要你参与可直接设置并沉睡；若你参与了回复，则下次想睡需重新等待观察窗口。',
+  `设置指定会话的二代唤醒配置：mode/无限期或有限时间/提前唤醒条件（@、名字、关键词、提问、${platformHasPoke ? '拍一拍、' : ''}概率、anyMessage、指定成员）。triggers.speakerIds 是可选的“指定群友发言唤醒”：填一个或多个群友的用户 id后，只要其中任意一位在群里发言就会唤醒你；不设置则不启用。适合在等某个人回复、或某人反应慢怕错过时使用。${platformHasPoke ? 'triggers.poke 开启后，群里有人拍一拍（包括拍你或拍别人）会唤醒你。' : ''}注意：每次设置潜水/下一次唤醒前需先用 chat_wait_for_messages(timeoutMs=300000) 完成一次沉睡前观察：5 分钟内没人说话可设置并沉睡；期间有人发新消息则先查看 newMessages，判断不需要你参与可直接设置并沉睡；若你参与了回复，则下次想睡需重新等待观察窗口。`,
   {
     key: z.string().describe('会话 key，格式 group:群id 或 private:用户id'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
@@ -676,7 +685,7 @@ server.tool(
         speakerIds: z.array(z.union([z.number(), z.string()])).max(20).optional().describe('指定群友的用户 id 数组：这些群友中任意一位发言时唤醒（可选，最多 20 个，不设置则不启用；私聊不适用，设置会被桥接清除；可从 chat_get_active_members / chat_get_group_members / chat_get_message_detail 的 userId/user_id 获取）'),
         keywords: z.array(z.string()).optional().describe('出现任意关键词时唤醒'),
         question: z.boolean().optional().describe('被直接提问/点名挑战时唤醒'),
-        poke: z.boolean().optional().describe('有人拍一拍时唤醒（群聊包括拍你和拍别人，私聊为对方拍你）'),
+        ...(platformHasPoke ? { poke: z.boolean().optional().describe('有人拍一拍时唤醒（群聊包括拍你和拍别人，私聊为对方拍你）') } : {}),
         anyMessage: z.boolean().optional().describe('任意新消息都唤醒（活跃模式）'),
         probability: z.number().optional().describe('普通消息按该概率随机唤醒（0~1）')
       }).optional(),
@@ -742,7 +751,7 @@ server.tool(
     key: z.string().describe('会话 key，格式 group:群id 或 private:用户id'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
     messages: z.union([z.string(), z.array(z.string()).min(1)]).describe('要发送的内容：字符串=一条；数组=分多条'),
-    replyToMessageId: z.union([z.number(), z.string()]).optional().describe('要引用/回复的消息 id（非零整数，可为负数，可选）'),
+    replyToMessageId: z.union([z.number(), z.string()]).optional().describe(`要引用/回复的消息 id（${onDiscord ? DISCORD_MESSAGE_ID : '非零整数，可为负数'}，可选）`),
     atUserId: z.union([z.number(), z.string()]).optional().describe('要 @ 的群成员的用户 id（群聊中用于点名某个人；与引用二选一即可，不要滥用）'),
     gapMode: z.enum(['auto', 'fixed', 'byLength']).optional().describe('auto=桥接随机；fixed=固定间隔；byLength=按字数计算'),
     gapMs: z.number().optional().describe('fixed 模式下的统一间隔（毫秒）'),
@@ -881,7 +890,7 @@ server.tool(
   {
     key: z.string().describe('会话 key，格式 group:群id 或 private:用户id'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-    messageId: z.union([z.number(), z.string()]).describe('要查看的消息 id（可能为负数）')
+    messageId: z.union([z.number(), z.string()]).describe(`要查看的消息 id（${onDiscord ? DISCORD_MESSAGE_ID : '可能为负数'}）`)
   },
   async ({ key, token, messageId }) => {
     try {
@@ -1056,7 +1065,7 @@ if (cfg.socialV2?.tools?.getImages !== false) {
     '获取指定消息中的图片/表情，并直接以图像内容返回给模型（视觉模型可“看懂”）。当消息文本里出现 [图片]、[表情] 或 hasMedia=true 时调用。支持一条消息里的多张图片/表情；二代模式下必须携带会话令牌。**动图（GIF/动态表情）会被桥接抽帧拼成多格图再给你**：说明里会写「动图 N 帧/…s，已抽 X 帧拼成 A×B 网格，行优先 左上→右下」——按格子顺序理解动作即可，不要把它当成一张九宫格照片；没有这类说明就是静态图。体积过大的图会被自动缩放/重编码，说明里会给出原始尺寸与体积；如果真的压不到可用体积，返回里会直接写明原因（例如「超过上限」），此时如实告诉对方你看不到，不要编造画面。',
     {
       key: z.string().describe('会话 key，格式 group:群id 或 private:用户id'),
-      messageId: z.union([z.number(), z.string()]).describe('要查看的消息 id（可为负数；二代也可用本地 seq）'),
+      messageId: z.union([z.number(), z.string()]).describe(`要查看的消息 id（${onDiscord ? DISCORD_MESSAGE_ID : '可为负数'}；二代也可用本地 seq）`),
       token: z.string().optional().describe('二代会话令牌（reserved2 下必填，见唤醒提示中的【会话令牌】）')
     },
     async ({ key, messageId, token }) => {
@@ -1157,7 +1166,7 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.sendSticker
       key: z.string().describe('会话 key，格式 group:群id 或 private:用户id'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
       stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 chat_list_stickers）'),
-      replyToMessageId: z.union([z.number(), z.string()]).optional().describe('要引用/回复的消息 id（非零整数，可为负数，可选）'),
+      replyToMessageId: z.union([z.number(), z.string()]).optional().describe(`要引用/回复的消息 id（${onDiscord ? DISCORD_MESSAGE_ID : '非零整数，可为负数'}，可选）`),
       atUserId: z.union([z.number(), z.string()]).optional().describe('要 @ 的群成员的用户 id（群聊中可选，私聊不可用）')
     },
     async ({ key, token, stickerId, replyToMessageId, atUserId }) => {
@@ -1205,14 +1214,14 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.collectStic
 if (cfg.socialV2?.voice?.enabled !== false && cfg.socialV2?.tools?.sendVoice !== false) {
   server.tool(
     'chat_send_voice',
-    '在指定会话发一条语音（把语音库里准备好的音频当语音条发出去）。voice 传 chat_list_voices 返回的 name（文件名，可带子目录），也可以直接传语音库里的文件名（不带扩展名也能匹配）。注意：① 只能发语音库（qq-bridge/audio/）里的文件，不能发任意本地路径，也不能发 URL/base64；② 受时长与频率上限约束（见 chat_list_voices 的 limits），超限会被拒绝；③ 语音是「开口说话」的强表达，别滥用，闲聊里偶尔发一条即可；④ 返回的 verified=true 表示已经用 get_msg 回读到这条消息的 record 段（语音确实落地了）—— 只有 verified=true 才能对用户说你发了语音；⑤ readback 只对「收到的」语音有意义（平台可能会转写别人的语音），自己发的语音一般拿不到转写文本，默认关闭，别依赖它。',
+    `在指定会话发一条语音（把语音库里准备好的音频当${onDiscord ? '音频文件' : '语音条'}发出去）。voice 传 chat_list_voices 返回的 name（文件名，可带子目录），也可以直接传语音库里的文件名（不带扩展名也能匹配）。注意：① 只能发语音库（qq-bridge/audio/）里的文件，不能发任意本地路径，也不能发 URL/base64；② 受时长与频率上限约束（见 chat_list_voices 的 limits），超限会被拒绝；③ 语音是「开口说话」的强表达，别滥用，闲聊里偶尔发一条即可；④ 返回的 verified=true 表示已经${onDiscord ? '回读到这条消息的音频附件' : '用 get_msg 回读到这条消息的 record 段'}（语音确实落地了）—— 只有 verified=true 才能对用户说你发了语音${onDiscord ? '。' : '；⑤ readback 只对「收到的」语音有意义（平台可能会转写别人的语音），自己发的语音一般拿不到转写文本，默认关闭，别依赖它。'}`,
     {
       key: z.string().describe('会话 key，格式 group:群id 或 private:用户id'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
       voice: z.string().describe('语音库里的文件名（来自 chat_list_voices 的 name，可带子目录/可省略扩展名）'),
       label: z.string().optional().describe('可选：写进会话记录里的说明，如「说了句晚安」'),
       verify: z.boolean().optional().describe('是否回读校验语音已落地（默认 true，建议保持开启）'),
-      readback: z.boolean().optional().describe('是否额外索取平台的转写文本（自己发的语音通常没有，默认 false）')
+      ...(onDiscord ? {} : { readback: z.boolean().optional().describe('是否额外索取平台的转写文本（自己发的语音通常没有，默认 false）') })
     },
     async ({ key, token, voice, label, verify, readback }) => {
       try {
