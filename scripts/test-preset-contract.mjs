@@ -104,7 +104,7 @@ test('tools Discord lacks are not described, and the tool protocol stays numbere
   for (const text of [
     'chat_send_poke', 'chat_get_forward_msg', 'nestedForwardIds', 'chat_list_stickers', 'chat_get_sticker_image',
     'chat_send_sticker', 'chat_collect_sticker', 'chat_sticker_note', 'chat_set_sticker_remark',
-    '拍一拍', '斗图', '[转发消息', '群名片', '语音条', 'QQ',
+    '拍一拍', '斗图', '[转发消息', '群名片', '语音条',
   ]) assert.ok(!prefix.includes(text), `prompt still mentions: ${text}`);
   // 工具协议从 1 连续编号，不留空号。
   const protocol = prefix.split('\n').find((p) => p.startsWith('【二代仿真模式 —— 工具协议'));

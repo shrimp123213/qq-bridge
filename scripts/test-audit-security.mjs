@@ -1,4 +1,4 @@
-// Offline regression tests: no sockets, QQ messages, production config or secrets.
+// Offline regression tests: no sockets, Discord messages, production config or secrets.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import dns from 'node:dns';
@@ -116,8 +116,8 @@ test('HTTP transport pins the validated IP and preserves Host and TLS SNI', asyn
 });
 
 test('dual-stack hosts try IPv4 first and fail over to the next validated address', async (t) => {
-  // 真实故障形态：QQ 表情 CDN 的 AAAA 记录排在前面，而本机没有 IPv6 出口 ——
-  // 只取第一个地址的旧实现会一路等到 20 秒超时（表现为「部分表情/图片发不出去」）。
+  // 真实故障形态：CDN 的 AAAA 记录排在前面，而本机没有 IPv6 出口 ——
+  // 只取第一个地址的旧实现会一路等到 20 秒超时（表现为「部分图片时好时坏」）。
   const before = lookupCalls.length;
   const { requests } = mockTransport(t, [{ failWith: 'connect ETIMEDOUT' }, { body: 'second address ok' }]);
   const result = await safeFetch('https://dual.test/sticker');

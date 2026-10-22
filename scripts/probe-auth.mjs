@@ -83,7 +83,7 @@ export function probeMuxSocket(cookie, { base = PROBE_BASE } = {}) {
  * @param name - 子目录名（探针名即可）。
  */
 export function probeWorkspaceDir(name) {
-  const dir = path.join(os.tmpdir(), `qq-bridge-probe-${name}`);
+  const dir = path.join(os.tmpdir(), `discord-bridge-probe-${name}`);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   return dir;

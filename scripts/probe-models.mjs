@@ -11,7 +11,7 @@ import { PROBE_BASE as BASE, probeCookie, probeRpc } from './probe-auth.mjs';
 // 鉴权与 RPC 引导统一走 probe-auth.mjs（旧的「读 guard 日志抓 launch token」在
 // DSH 0.1.7 起已失效，会让探针一律 401 —— 见该文件头部说明）。
 const rpc = probeRpc(probeCookie());
-const outDir = path.join(os.tmpdir(), 'qq-bridge-probe-models');
+const outDir = path.join(os.tmpdir(), 'discord-bridge-probe-models');
 fs.mkdirSync(outDir, { recursive: true });
 
 const out = await rpc('settings/describe', {});

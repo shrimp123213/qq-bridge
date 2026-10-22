@@ -23,7 +23,7 @@ async function main() {
   const api = new NodeApiClient('http://127.0.0.1:3080', undefined, auth);
   // 探测会话的 cwd 用系统临时目录：state/ 的 ACL 被 harden-state-acl.mjs 收紧过，
   // 沙箱里写不进去（见 scripts/probe-auth.mjs 的同款说明）。
-  const cwd = path.join(os.tmpdir(), 'qq-bridge-self-test-v2-wait');
+  const cwd = path.join(os.tmpdir(), 'discord-bridge-self-test-v2-wait');
   fs.mkdirSync(cwd, { recursive: true });
   const created = unwrap(await api.sessions.create({ cwd, agentPreset: 'dc-chat-v2' }), 'session.create');
   const sessionId = created.sessionId;

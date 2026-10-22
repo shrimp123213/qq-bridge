@@ -2,7 +2,7 @@
 //
 // 为什么需要这个文件
 // ------------------
-// 桥接退役/重置 QQ 会话时要先清掉 DSH 侧还没跑的**待处理队列**，再取消当前 turn
+// 桥接退役/重置聊天会话时要先清掉 DSH 侧还没跑的**待处理队列**，再取消当前 turn
 // （`stopSessionWork`）。读队列这一步过去只认 `session/control` 开场 baseline 里的
 // `value.queues[<sessionId>]`：
 //
@@ -39,7 +39,7 @@ const realInboxItem = (id, text) => ({
 
 /** DSH 0.2.0 的 SessionProjectionValues 骨架（只保留本测试关心的键）。 */
 const projectionValues = (inbox) => ({
-  title: 'QQ 聊天',
+  title: 'Discord 聊天',
   tokenUsage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
   ...(inbox === undefined ? {} : { inbox }),
 });

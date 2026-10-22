@@ -37,8 +37,8 @@ const isElevatedRun = process.argv.includes('--elevated');
 function say(msg) { if (!quiet) console.log(msg); }
 function sayAlways(msg) { console.log(msg); }
 
-// state/ 之外的凭据文件：config.json 里是真实的 SnowLuma OneBot accessToken ——
-// 拿到它等于拿到 QQ 账号的收发控制权。它跟 state/ 一样在仓库树里，继承来的 ACE 同样
+// state/ 之外的凭据文件：config.json 里是真实的 Discord bot token ——
+// 拿到它等于拿到这个 bot 账号的收发控制权。它跟 state/ 一样在仓库树里，继承来的 ACE 同样
 // 对 BUILTIN\Users 可读，所以一并收紧。
 const SECRET_FILES = ['config.json']
   .map((name) => path.join(ROOT, name))
@@ -100,7 +100,7 @@ if (isHardened(STATE_DIR)) {
   process.exit(0);
 }
 
-sayAlways('[harden-acl] state/ 权限未收紧：其中的控制台令牌、SnowLuma 令牌、各会话令牌与 QQ 聊天记录，本机任何已登录用户都可能读到。');
+sayAlways('[harden-acl] state/ 权限未收紧：其中的控制台令牌、各会话令牌与聊天记录，本机任何已登录用户都可能读到。');
 sayAlways(`[harden-acl] 正在尝试收紧：${STATE_DIR}`);
 
 let result = hardenDir(STATE_DIR);

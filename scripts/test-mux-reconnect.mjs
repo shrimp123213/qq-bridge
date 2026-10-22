@@ -4,7 +4,7 @@
 // 排空一次。DSH 重启或任何 WS 中断会重建 generator，队列已空 → 一个会话都不 follow，
 // 而 session 事件只由 session/follow 逻辑流推送（$events 的 allowlist 不含
 // session/event）。后果：prompt 被接受、ackMessage 也发了，然后**永远没有回复**，
-// 且没有任何报错——QQ 上表现为「新人能聊、老会话集体失联」。
+// 且没有任何报错——Discord 上表现为「新人能聊、老会话集体失联」。
 //
 // 本测试用假 WebSocket 精确控制 open/close，不需要真实 DSH、不发任何网络请求。
 import path from 'node:path';

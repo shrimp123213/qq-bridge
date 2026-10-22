@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Real-browser tests against an isolated fixture. Never starts qq-bridge or sends real messages. */
+/** Real-browser tests against an isolated fixture. Never starts the bridge or sends real messages. */
 import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -11,13 +11,11 @@ import { startConsoleFixture } from './console-ui-fixture.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
-const original = args.includes('--original');
 const record = args.includes('--record-baseline');
 const artifacts = args.find(x => x.startsWith('--artifacts='))?.slice('--artifacts='.length);
 const views = ['overview', 'sessions', 'persona', 'social-v2', 'social-v1', 'slang', 'usage', 'access', 'operations', 'reference'];
 const legacyIds = JSON.parse((await readFile(join(here, 'console-ui-legacy-ids.json'), 'utf8')).replace(/^\uFEFF/, ''));
 const baselinePath = join(here, 'console-ui-contracts.json');
-if (record && !original) throw new Error('--record-baseline requires --original; only the pre-redesign console can define the baseline.');
 
 async function loadPlaywright() {
   const require = createRequire(import.meta.url);
@@ -32,7 +30,7 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || [
   join(process.env.PROGRAMFILES || '', 'Google/Chrome/Application/chrome.exe'),
   join(process.env['PROGRAMFILES(X86)'] || '', 'Microsoft/Edge/Application/msedge.exe'),
 ].find(x => existsSync(x));
-const fixture = await startConsoleFixture({ original });
+const fixture = await startConsoleFixture();
 let browser;
 const results = [];
 const errors = [];
@@ -62,7 +60,6 @@ try {
   await page.waitForFunction(() => document.getElementById('v2AgentPreset')?.value === 'dc-chat-v2' && document.getElementById('wlGroups')?.value.includes('123456789'));
 
   async function navigate(view) {
-    if (original) return;
     if (await page.locator(`[data-page="${view}"]:visible`).count()) return;
     const nav = page.locator(`[data-view="${view}"]`).first();
     if (!await nav.isVisible()) {
@@ -93,14 +90,14 @@ try {
     return fixture.requests.at(-1)?.body;
   }
 
-  await test('All 225 legacy IDs remain present and every DOM ID is unique', async () => {
+  await test('All 215 legacy IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
-    assert.equal(legacyIds.length, 225);
+    assert.equal(legacyIds.length, 215);
     assert.deepEqual(legacyIds.filter(x => !ids.includes(x)), []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
   });
 
-  if (!original) await test('All ten navigation destinations work and preserve unsaved form values across polling', async () => {
+  await test('All ten navigation destinations work and preserve unsaved form values across polling', async () => {
     for (const view of views) {
       await navigate(view);
       const visiblePages = await page.locator('[data-page]').evaluateAll(nodes => nodes.filter(x => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden').map(x => x.dataset.page));
@@ -157,7 +154,7 @@ try {
     assert.match(shown.path, /state/, '应当显示 state 目录路径');
     assert.match(shown.cmd, /icacls/, '应当给出可复制的提权命令');
     // 只验证按钮确实发起「重新检测」请求，**不**写进/触发 baseline 的写载荷契约
-    // （baseline 记录的是改版前控制台的表单写载荷，这条不算表单写）。
+    // （baseline 记录的是控制台的表单写载荷，这条不算表单写）。
     await page.waitForFunction(() => document.getElementById('stateDirReharden') !== null);
     const [request] = await Promise.all([
       page.waitForRequest(r => new URL(r.url()).pathname === '/api/security' && r.method() === 'POST'),
@@ -236,8 +233,8 @@ try {
   await test('Test message and AI notification reach only the mock endpoints', async () => {
     await (await reveal('#tsKind')).selectOption('group');
     await fill('tsId', '123456789');
-    await fill('tsMsg', '离线测试，不会发往 QQ。');
-    assert.deepEqual(await clickWrite('#tsSend', '/api/test-send'), { kind: 'group', id: '123456789', message: '离线测试，不会发往 QQ。' });
+    await fill('tsMsg', '离线测试，不会发往 Discord。');
+    assert.deepEqual(await clickWrite('#tsSend', '/api/test-send'), { kind: 'group', id: '123456789', message: '离线测试，不会发往 Discord。' });
     await (await reveal('#aiNotifyKind')).selectOption('private');
     await fill('aiNotifyId', '100001');
     await fill('aiNotifyMessage', '离线提醒，不会发往 DSH。');
@@ -247,13 +244,13 @@ try {
   if (record) {
     assert(results.every(x => x.ok), 'Cannot record a baseline from a failed suite');
     await writeFile(baselinePath, JSON.stringify(fixture.requests, null, 2) + '\n');
-    console.log(`Recorded original API contracts: ${baselinePath}`);
-  } else await test('All submitted payloads exactly match the pre-redesign console baseline', async () => {
+    console.log(`Recorded API contracts: ${baselinePath}`);
+  } else await test('All submitted payloads exactly match the recorded API contracts', async () => {
     const expected = JSON.parse(await readFile(baselinePath, 'utf8'));
     assert.deepEqual(fixture.requests, expected);
   });
 
-  if (!original) await test('Token usage panel renders totals, per-conversation and per-turn cost', async () => {
+  await test('Token usage panel renders totals, per-conversation and per-turn cost', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await navigate('usage');
     await page.waitForFunction(() => document.getElementById('metricUsageTokens')?.textContent !== '—');
@@ -289,7 +286,7 @@ try {
     assert.match(await page.textContent('#usagePrices'), /deepseek-flash/, '价目表应列出模型单价');
   });
 
-  if (!original) await test('Token usage trend chart renders bars, tiers and range/metric switching', async () => {
+  await test('Token usage trend chart renders bars, tiers and range/metric switching', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await navigate('usage');
     await page.waitForFunction(() => document.querySelectorAll('#usageChart svg rect.usage-bar-off, #usageChart svg rect.usage-bar-peak').length > 0);
@@ -348,7 +345,7 @@ try {
     await page.waitForFunction(() => document.querySelector('#usageChartControls [data-usage-hours="24"]')?.classList.contains('active'));
   });
 
-  if (!original) await test('Mobile and tablet layouts have no document-level horizontal overflow', async () => {
+  await test('Mobile and tablet layouts have no document-level horizontal overflow', async () => {
     for (const width of [390, 768]) {
       await page.setViewportSize({ width, height: 844 });
       for (const view of views) {
@@ -363,11 +360,11 @@ try {
     }
   });
 
-  if (!original) await test('Dark mode toggles, persists across reload and stays overflow-free', async () => {
+  await test('Dark mode toggles, persists across reload and stays overflow-free', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     const snapshot = () => page.evaluate(() => ({
       theme: document.documentElement.dataset.theme,
-      stored: localStorage.getItem('qq-console-theme'),
+      stored: localStorage.getItem('console-theme'),
       bodyBg: getComputedStyle(document.body).backgroundColor,
       text: getComputedStyle(document.body).color,
       scheme: getComputedStyle(document.documentElement).colorScheme,
@@ -404,7 +401,7 @@ try {
     assert.equal((await snapshot()).theme, 'light', '应能切回浅色');
   });
 
-  if (!original) await test('Console follows the system preference when no theme was chosen', async () => {
+  await test('Console follows the system preference when no theme was chosen', async () => {
     const systemDark = await browser.newContext({ viewport: { width: 1440, height: 1000 }, colorScheme: 'dark', serviceWorkers: 'block' });
     await systemDark.route('**/*', route => new URL(route.request().url()).origin === fixture.url ? route.continue() : route.abort('blockedbyclient'));
     const systemPage = await systemDark.newPage();
@@ -415,7 +412,7 @@ try {
     await systemDark.close();
   });
 
-  if (!original) await test('Reduced-motion preference disables decorative motion', async () => {
+  await test('Reduced-motion preference disables decorative motion', async () => {
     const calm = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
     await calm.route('**/*', route => new URL(route.request().url()).origin === fixture.url ? route.continue() : route.abort('blockedbyclient'));
     const calmPage = await calm.newPage();
@@ -433,7 +430,7 @@ try {
     await calm.close();
   });
 
-  if (!original) await test('人格管理：新建 → 载入编辑 → 保存修改 → 重命名 → 删除', async () => {
+  await test('人格管理：新建 → 载入编辑 → 保存修改 → 重命名 → 删除', async () => {
     await navigate('persona');
     const created = '回归人格A';
     const renamed = '回归人格B';
@@ -475,7 +472,7 @@ try {
     assert.match(await page.locator('#roleCreateMsg').textContent(), /已删除/);
   });
 
-  if (!original) await test('仿真提示词默认可查看、解锁后可编辑、保存后提示需重启 DSH', async () => {
+  await test('仿真提示词默认可查看、解锁后可编辑、保存后提示需重启 DSH', async () => {
     await navigate('persona');
     await page.waitForFunction(() => document.getElementById('simPromptText').value.length > 0);
     assert.equal(await page.locator('#simPromptText').getAttribute('readonly'), '', '默认应为只读');
@@ -496,7 +493,7 @@ try {
     assert.equal(await page.locator('#simPromptText').getAttribute('readonly'), '', '保存后应回到只读');
   });
 
-  if (!original) await test('仿真提示词可切换到一代/二代，两代内容相互独立', async () => {
+  await test('仿真提示词可切换到一代/二代，两代内容相互独立', async () => {
     await navigate('persona');
     await page.waitForFunction(() => document.getElementById('simPromptText').value.length > 0);
     const v2 = await page.locator('#simPromptText').inputValue();
@@ -511,7 +508,7 @@ try {
     await page.waitForFunction((prev) => document.getElementById('simPromptText').value === prev, v2);
   });
 
-  if (!original) await test('人格注入上限可调，且随模式筛选后统计', async () => {
+  await test('人格注入上限可调，且随模式筛选后统计', async () => {
     await navigate('persona');
     await page.waitForFunction(() => document.querySelectorAll('#roleList .persona-item').length > 0);
     const before = await page.locator('#roleInjectMax').inputValue();
@@ -530,7 +527,7 @@ try {
     await page.waitForFunction(() => document.getElementById('roleInjectMaxMsg').textContent.includes('6000'));
   });
 
-  if (!original) await test('思考强度：档位来自 DSH、默认 max、可切换并明示全局副作用', async () => {
+  await test('思考强度：档位来自 DSH、默认 max、可切换并明示全局副作用', async () => {
     await navigate('overview');
     await page.waitForFunction(() => document.getElementById('dshEffortSelect').options.length > 0);
     const options = await page.locator('#dshEffortSelect option').evaluateAll((nodes) => nodes.map((n) => n.value));
@@ -554,22 +551,20 @@ try {
   if (artifacts) {
     await mkdir(resolve(artifacts), { recursive: true });
     await page.setViewportSize({ width: 1440, height: 1000 });
-    for (const view of original ? ['overview'] : ['overview', 'persona', 'social-v2', 'slang', 'access']) {
+    for (const view of ['overview', 'persona', 'social-v2', 'slang', 'access']) {
       await navigate(view);
-      await page.screenshot({ path: resolve(artifacts, `${original ? 'original' : 'desktop'}-${view}.png`), fullPage: true, animations: 'disabled' });
+      await page.screenshot({ path: resolve(artifacts, `desktop-${view}.png`), fullPage: true, animations: 'disabled' });
     }
-    if (!original) {
-      await page.locator('#themeToggle').click();
-      for (const view of ['overview', 'social-v2']) {
-        await navigate(view);
-        await page.screenshot({ path: resolve(artifacts, `dark-${view}.png`), fullPage: true, animations: 'disabled' });
-      }
-      await page.setViewportSize({ width: 390, height: 844 });
-      await navigate('overview');
-      await page.screenshot({ path: resolve(artifacts, 'dark-mobile-overview.png'), fullPage: true, animations: 'disabled' });
-      await page.setViewportSize({ width: 1440, height: 1000 });
-      await page.locator('#themeToggle').click();
+    await page.locator('#themeToggle').click();
+    for (const view of ['overview', 'social-v2']) {
+      await navigate(view);
+      await page.screenshot({ path: resolve(artifacts, `dark-${view}.png`), fullPage: true, animations: 'disabled' });
     }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await navigate('overview');
+    await page.screenshot({ path: resolve(artifacts, 'dark-mobile-overview.png'), fullPage: true, animations: 'disabled' });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.locator('#themeToggle').click();
   }
   await test('No JavaScript errors, unknown API routes or external requests', async () => {
     assert.deepEqual(errors, []);
@@ -581,7 +576,7 @@ try {
   await fixture.close();
   if (artifacts) {
     await mkdir(resolve(artifacts), { recursive: true });
-    await writeFile(resolve(artifacts, 'test-results.json'), JSON.stringify({ original, results, requests: fixture.requests, errors, blockedRequests }, null, 2) + '\n');
+    await writeFile(resolve(artifacts, 'test-results.json'), JSON.stringify({ results, requests: fixture.requests, errors, blockedRequests }, null, 2) + '\n');
   }
 }
 const failed = results.filter(x => !x.ok);

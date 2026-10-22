@@ -12,12 +12,8 @@ config.json
 # Local development / planning / research docs (not part of public project)
 /PROJECT_GUIDE.md
 /ARCH_REVIEW.md
-/DSH_QQ_TOOLS_PLAN.md
 /GEN2_SIMULATION_PLAN.md
 /SOCIAL_MODE_PLAN.md
-/RESEARCH_QQ_MESSAGE_DND.md
-/RESEARCH_SNOWLUMA_EMOJI_STICKER.md
-/SnowLuma功能调研.md
 /真人语感策略.md
 # 花费实测档案：含个人用量数据，且未被任何公开文档引用 —— 默认不发布。
 # （如需公开，删掉这一行并挪到 docs/ 后从 README 链接，避免成为孤儿文件。）
@@ -39,13 +35,10 @@ config.json
 /scripts/debug-whitelist.mjs
 /scripts/diag-archive.mjs
 /scripts/fix-probe-workspace-title.mjs
-/scripts/patch-qq-chat-v2-collect-memory.mjs
-/scripts/patch-qq-chat-v2-presleep.mjs
-/scripts/patch-qq-chat-v2-stickers.mjs
 /scripts/patch-web-mcp-timeout.mjs
 
 
-# 本机专用的隐私扫描规则（含真实 QQ 号/路径，不入库）
+# 本机专用的隐私扫描规则（含真实用户 id/路径，不入库）
 /scripts/privacy-rules.json
 
 # ── 内部文档保护（修复：忽略规则仍指向旧的根目录路径）──────────────────────
@@ -58,8 +51,6 @@ docs/audits/
 docs/design/
 docs/legacy/
 docs/research/
-docs/qq-bridge-PUBLISH_PLAN.md
-docs/qq-bridge-SECURITY_AUDIT.md
 docs/guides/PROJECT_GUIDE.md
 docs/guides/VOICE.md
 

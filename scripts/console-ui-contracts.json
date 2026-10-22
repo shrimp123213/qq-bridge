@@ -126,26 +126,18 @@
         "reply": true,
         "sendBurst": true,
         "sendMessage": true,
-        "sendPoke": true,
         "waitMessages": true,
         "feedback": true,
         "getMyRecent": true,
         "getMessageDetail": true,
         "getImages": true,
-        "getForwardMsg": true,
         "getActiveMembers": true,
         "setWakeConfig": true,
         "markRead": true,
         "memory": true,
         "slangQuery": true,
         "slangSubmit": true,
-        "listStickers": true,
-        "getStickerImage": true,
-        "sendSticker": true,
-        "collectSticker": true,
-        "getSelfImage": true,
-        "stickerNote": true,
-        "setStickerRemark": true
+        "getSelfImage": true
       },
       "wake": {
         "defaultMode": "diving",
@@ -163,7 +155,6 @@
         "recommendedAtMention": true,
         "recommendedNameMention": true,
         "recommendedQuestion": true,
-        "recommendedPoke": true,
         "recommendedHint": "",
         "sleepMinMs": 42000,
         "sleepMaxMs": 0,
@@ -202,19 +193,6 @@
         "checkIntervalMaxMs": 5400000,
         "idleThresholdMs": 900000,
         "probability": 0.3
-      },
-      "sticker": {
-        "enabled": true,
-        "syncTtlMs": 60000,
-        "maxListCount": 100,
-        "includeInPrompt": true,
-        "promptMaxStickers": 8,
-        "collect": {
-          "enabled": true,
-          "maxPerMinute": 2,
-          "maxPerHour": 10,
-          "maxRemarkChars": 20
-        }
       },
       "context": {
         "recentLimit": 100,
@@ -245,26 +223,18 @@
         "reply": true,
         "sendBurst": true,
         "sendMessage": true,
-        "sendPoke": true,
         "waitMessages": true,
         "feedback": true,
         "getMyRecent": true,
         "getMessageDetail": true,
         "getImages": true,
-        "getForwardMsg": true,
         "getActiveMembers": true,
         "setWakeConfig": true,
         "markRead": true,
         "memory": true,
         "slangQuery": true,
         "slangSubmit": true,
-        "listStickers": true,
-        "getStickerImage": true,
-        "sendSticker": true,
-        "collectSticker": true,
-        "getSelfImage": true,
-        "stickerNote": true,
-        "setStickerRemark": true
+        "getSelfImage": true
       },
       "wake": {
         "defaultMode": "diving",
@@ -282,7 +252,6 @@
         "recommendedAtMention": true,
         "recommendedNameMention": true,
         "recommendedQuestion": true,
-        "recommendedPoke": true,
         "recommendedHint": "",
         "sleepMinMs": 42000,
         "sleepMaxMs": 0,
@@ -321,19 +290,6 @@
         "checkIntervalMaxMs": 5400000,
         "idleThresholdMs": 900000,
         "probability": 0.3
-      },
-      "sticker": {
-        "enabled": true,
-        "syncTtlMs": 60000,
-        "maxListCount": 100,
-        "includeInPrompt": true,
-        "promptMaxStickers": 8,
-        "collect": {
-          "enabled": true,
-          "maxPerMinute": 2,
-          "maxPerHour": 10,
-          "maxRemarkChars": 20
-        }
       },
       "context": {
         "recentLimit": 100,
@@ -446,7 +402,7 @@
       ],
       "injectMax": 8,
       "learnerPreset": "dc-chat",
-      "workspaceTitle": "QQ 黑话学习",
+      "workspaceTitle": "Discord 黑话学习",
       "autoResearch": true
     }
   },
@@ -456,7 +412,7 @@
     "body": {
       "kind": "group",
       "id": "123456789",
-      "message": "离线测试，不会发往 QQ。"
+      "message": "离线测试，不会发往 Discord。"
     }
   },
   {

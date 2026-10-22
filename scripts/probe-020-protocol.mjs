@@ -1,7 +1,7 @@
 // DSH 0.2.0 协议契约实测探针（只读观测 + 自清理）。
 //
 // 目的：把「桥接依赖的每一处 DSH 线上契约」在真实运行的 DSH 上采样一遍，
-// 打印**原始帧结构**（键名与类型），供适配对账。不依赖 SnowLuma，不改动任何
+// 打印**原始帧结构**（键名与类型），供适配对账。不依赖 Discord，不改动任何
 // 用户状态（探测会话/工作区跑完即归档删除）。
 //
 // 重点回答：
@@ -97,7 +97,7 @@ else console.log('（未收到 baseline）');
 // 探测会话：建一个工作区 + 会话，prompt 一条，观察 control 投影帧
 // 探测工作区放在系统临时目录：仓库内的 state/ 被 harden-state-acl.mjs 收紧了 ACL
 // （去掉继承 ⇒ 沙箱进程的 SID 不在 ACL 里），从沙箱里跑探针会 EPERM。
-const probeDir = path.join(os.tmpdir(), 'qq-bridge-probe-020');
+const probeDir = path.join(os.tmpdir(), 'discord-bridge-probe-020');
 fs.rmSync(probeDir, { recursive: true, force: true });
 fs.mkdirSync(probeDir, { recursive: true });
 const ws = await rpc('workspace/create', { request: { title: '__probe-020__', path: probeDir } });

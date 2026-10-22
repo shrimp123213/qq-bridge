@@ -1,4 +1,4 @@
-// Offline regression tests. No real DSH/QQ endpoints or local credentials are read.
+// Offline regression tests. No real DSH/Discord endpoints or local credentials are read.
 import assert from 'node:assert/strict';
 import { NodeApiClient } from '../src/dsh-client.js';
 

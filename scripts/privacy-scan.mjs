@@ -1,6 +1,6 @@
 // 发布前隐私与敏感信息扫描（**离线、只读、不联网**）。
 //
-// 为什么需要它：这个项目在一台真实机器上跑过，工作树里散落着真实 QQ 号、群号、本机绝对路径、
+// 为什么需要它：这个项目在一台真实机器上跑过，工作树里散落着真实用户 id、频道 id、本机绝对路径、
 // 令牌、以及个人化的人格卡内容。任何一次"忘了 gitignore 就直接推"都会把这些永久写进公开仓库历史
 // ——而 Git 历史里的东西删提交是删不掉的（还会被 fork 保留）。
 //
@@ -28,11 +28,11 @@ const asJson = args.includes('--json');
 
 // 默认规则：即使没有 privacy-rules.json 也能挡住最常见的一类泄漏。
 const DEFAULT_RULES = {
-  comment: '默认规则。请把 privacy-rules.json 加进 .gitignore（它含你的真实 QQ 号/路径），本文件是脱敏模板。',
+  comment: '默认规则。请把 privacy-rules.json 加进 .gitignore（它含你的真实用户 id/路径），本文件是脱敏模板。',
   deny: [
     { name: '本机绝对路径（Windows 用户目录）', pattern: '[A-Za-z]:\\\\Users\\\\[^\\\\\\s"\'`]{2,}', flags: 'i' },
     { name: '本机绝对路径（非系统盘的顶层目录）', pattern: '(?<![A-Za-z0-9])(?!C:)[A-Za-z]:\\\\[^\\\\\\s"\'`|<>]{2,}\\\\', flags: 'i' },
-    { name: 'QQ 号/群号（9-10 位连续数字）', pattern: '(?<![0-9])[1-9][0-9]{8,9}(?![0-9])', flags: '' },
+    { name: 'Discord 用户/频道 id（17-20 位连续数字）', pattern: '(?<![0-9])[1-9][0-9]{16,19}(?![0-9])', flags: '' },
     // 真实凭据是**高熵**的；`dea3ce8c408a...` 这种 40 位全 hex 是 git commit SHA，
     // 报它属于纯粹的噪音（会让整个扫描被无视）。所以只报"含非 hex 字符的长串"。
     { name: '疑似令牌/密钥（高熵串）', pattern: '(?<![0-9a-zA-Z])[0-9a-zA-Z_-]{32,}(?![0-9a-zA-Z])', flags: '', requireNonHex: true },
@@ -49,7 +49,7 @@ const DEFAULT_RULES = {
     'scripts/privacy-', 'config.example.json', 'package-lock.json', 'src/sensitive.js',
     // 测试夹具/回归脚本：里面是刻意构造的假 ID 与假凭据
     'scripts/test-', 'scripts/console-ui-', 'scripts/fixtures/', 'scripts/audit-bridge-harness.mjs',
-    'scripts/check-onebot-status.mjs', 'scripts/send-test-group.mjs', 'scripts/send-voice.mjs',
+    'scripts/send-voice.mjs',
     'scripts/setup-dsh.mjs', 'scripts/patch-', 'scripts/verify-', 'scripts/probe-',
     // ── 以下三项来自一次独立复核：在**全新克隆**里扫描会报 15 条命中，全部是误报，
     //    但它们此前只写在本地 privacy-rules.json（不入库）里，所以对外部验证者而言

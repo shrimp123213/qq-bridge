@@ -31,7 +31,7 @@
 //        · session/modelCatalog 形状
 //        · 点号 endpoint 仍不可用（协议确为斜杠式）
 //
-// 不依赖 SnowLuma；不改动任何用户状态（探测会话会被 archive，探测工作区建在系统临时目录）。
+// 不依赖 Discord；不改动任何用户状态（探测会话会被 archive，探测工作区建在系统临时目录）。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -175,12 +175,12 @@ if (scanned.names.size === 0) {
 const patch = fs.readFileSync(path.join(DSH_HOME, 'profiles/web/cordis.patch.yml'), 'utf8');
 const patchDoc = yaml.load(patch);
 const mcpIds = patchDoc.filter((e) => e?.insert).flatMap((e) => e.insert.map((x) => x.id));
-check('profile patch 含 3 个 MCP 且无重复', mcpIds.length === 3 && new Set(mcpIds).size === 3, mcpIds.join(', '));
-const snowlumaEntry = patchDoc.filter((e) => e?.insert).flatMap((e) => e.insert).find((x) => x.id === 'mcp-snowluma');
-check('mcp-snowluma 带 toolCallTimeoutMs=725000', snowlumaEntry?.config?.toolCallTimeoutMs === 725000);
+check('profile patch 含 2 个 MCP 且无重复', mcpIds.length === 2 && new Set(mcpIds).size === 2, mcpIds.join(', '));
+const discordEntry = patchDoc.filter((e) => e?.insert).flatMap((e) => e.insert).find((x) => x.id === 'mcp-discord');
+check('mcp-discord 带 toolCallTimeoutMs=725000', discordEntry?.config?.toolCallTimeoutMs === 725000);
 check('mcp 路径指向本仓库', mcpIds.every((id) => {
   const e = patchDoc.filter((x) => x?.insert).flatMap((x) => x.insert).find((y) => y.id === id);
-  return String(e.config.args[0]).includes('qq-bridge');
+  return path.resolve(String(e.config.args[0])).startsWith(path.resolve(ROOT));
 }));
 
 const pkg = JSON.parse(fs.readFileSync(path.join(DSH_HOME, 'profiles/web/package.json'), 'utf8'));
@@ -209,7 +209,7 @@ check('bridge.js 含 preset 清单/默认 preset 解析', bridgeSrc.includes('re
 
 // 安全不变量回归防线：群聊/仿真会话在 preset 缺失时必须 fail-closed。
 // 旧实现会在 preset 不在 DSH 清单里时静默回退到 DSH 默认 preset（standard，含 bash/
-// 文件读写），把本地工具暴露给 QQ 群 —— 与 RULES.md「无本地工具」的承诺直接矛盾。
+// 文件读写），把本地工具暴露给 Discord 频道 —— 与 RULES.md「无本地工具」的承诺直接矛盾。
 check('preset 解析带 strict 开关', /resolvePresetName\(name, \{ strict = false \} = \{\}\)/.test(bridgeCode));
 check('非 closed-agent 模式以 strict 解析 preset', /resolvePresetName\(wanted, \{ strict: true \}\)/.test(bridgeCode));
 check('群聊模式缺少 preset 时拒绝建会话（fail-closed）', /strictPreset && !preset/.test(bridgeCode));
@@ -225,7 +225,7 @@ const pluginPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'plugins/discord-mo
 check('package-lock.json 顶层 version 与 package.json 一致', lockJson.version === pkgJson.version, `lock=${lockJson.version} pkg=${pkgJson.version}`);
 check('package-lock.json packages[""] version 与 package.json 一致', lockJson.packages?.['']?.version === pkgJson.version, `lock=${lockJson.packages?.['']?.version}`);
 check('discord-mode-console 插件版本与主包一致', pluginPkg.version === pkgJson.version, `plugin=${pluginPkg.version}`);
-for (const f of ['src/mcp-snowluma-safe.js', 'src/mcp-host-server.js', 'src/mcp-web-search-safe.js']) {
+for (const f of ['src/mcp-discord-safe.js', 'src/mcp-web-search-safe.js']) {
   const m = /new McpServer\(\{[^}]*version:\s*'([^']+)'/.exec(fs.readFileSync(path.join(ROOT, f), 'utf8'));
   check(`${f} 的 MCP serverInfo.version 与主包一致`, m?.[1] === pkgJson.version, `声明=${m?.[1]} 主包=${pkgJson.version}`);
 }
@@ -234,7 +234,7 @@ for (const f of ['src/mcp-snowluma-safe.js', 'src/mcp-host-server.js', 'src/mcp-
 // 注意 spawnSync 在受限环境（DSH 沙箱的 workspace-write）会以 EPERM 失败——
 // 那是**环境**不允许起子进程，不是文件有语法错。这种情况显式记为跳过，
 // 否则会输出一串假失败，把真正的失败淹掉（实测踩过）。
-const SYNTAX_FILES = ['src/bridge.js', 'src/dsh-client.js', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js', 'src/mcp-web-search-safe.js', 'src/slang-learner.js', 'src/self-test.js', 'scripts/setup-dsh.mjs'];
+const SYNTAX_FILES = ['src/bridge.js', 'src/dsh-client.js', 'src/mcp-discord-safe.js', 'src/platform/discord.js', 'src/mcp-web-search-safe.js', 'src/slang-learner.js', 'src/self-test.js', 'scripts/setup-dsh.mjs'];
 {
   const probe = spawnSync(process.execPath, ['--check', path.join(ROOT, 'src/dsh-client.js')], { encoding: 'utf8' });
   if (probe.error?.code === 'EPERM') {
@@ -298,7 +298,7 @@ if (modeNs) {
 }
 
 // ── 5b. session/projections：读会话队列的主路径 ──────────────────────────────
-const probeDir = path.join(os.tmpdir(), 'qq-bridge-verify-020');
+const probeDir = path.join(os.tmpdir(), 'discord-bridge-verify-020');
 fs.rmSync(probeDir, { recursive: true, force: true });
 fs.mkdirSync(probeDir, { recursive: true });
 const api = new NodeApiClient(BASE, undefined, {});
@@ -387,7 +387,7 @@ try {
   // ── 5g. preset 真跑一个回合：提示词变量可解析（0.2.1 断裂点回归网）──────────
   // 0.2.1 把 `cwd` 从 agent loop 的提示词变量表里删掉了（只剩 provider / model）。
   // system prompt 对未知变量是 fail loud ⇒ 回合在 turn/start 后立刻 error，
-  // 模型一次都不跑，QQ 上表现为「完全不回」。静态断言只能看出"写了什么变量"，
+  // 模型一次都不跑，Discord 上表现为「完全不回」。静态断言只能看出"写了什么变量"，
   // 只有真跑一回合才能证明它**可解析**。
   let turnSessionId = null;
   try {

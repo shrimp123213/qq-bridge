@@ -294,8 +294,8 @@ export function makeFixtureState() {
       技术伙伴: '# 技术伙伴\n\n- 性格：直接、爱讲原理\n- 说话风格：先给结论再解释',
     },
     simPrompts: {
-      'dc-chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
-      'dc-chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
+      'dc-chat-v2': '你是 Discord 服务器里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 Discord。',
+      'dc-chat': '你是 Discord 服务器里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 Discord。',
     },
     roleInjectMax: 8000,
     dshEffort: 'max',
@@ -321,7 +321,7 @@ export function makeFixtureState() {
     v2: { enabled: true, agentPreset: 'dc-chat-v2', provideRecommendations: true, tools: {} },
     // 会话初始提示词（离线示例）：整段内容都是虚构的演示文本。
     initPrompt: '离线示例：这是一个演示用的群聊环境说明，不会写进任何真实配置。',
-    slangConfig: { enabled: true, extractMinMessages: 10, extractCooldownMs: 300000, inferenceThresholds: [2, 4, 8], injectMax: 8, learnerPreset: 'dc-chat', workspaceTitle: 'QQ 黑话学习', autoResearch: true },
+    slangConfig: { enabled: true, extractMinMessages: 10, extractCooldownMs: 300000, inferenceThresholds: [2, 4, 8], injectMax: 8, learnerPreset: 'dc-chat', workspaceTitle: 'Discord 黑话学习', autoResearch: true },
     slang: [
       { id: 'demo-candidate', content: '有被治愈到', meaning: '感到温暖和安慰', status: 'candidate', count: 4, source: 'auto', evidence: [{ sender: '演示群友', text: '今天这张图，有被治愈到。' }], createdAt: timestamp, updatedAt: timestamp },
       { id: 'demo-confirmed', content: '绝绝子', meaning: '很好、很棒', usage: '表达赞美', example: '这个设计绝绝子。', status: 'confirmed', count: 12, source: 'manual', createdAt: timestamp, updatedAt: timestamp },
@@ -340,8 +340,8 @@ export function makeFixtureState() {
 }
 
 /** Bind only to loopback. Mutations affect this server's disposable in-memory state. */
-export async function startConsoleFixture({ port = 0, original = false, htmlPath, logWrites = false } = {}) {
-  const file = htmlPath || resolve(projectRoot, original ? 'scripts/fixtures/console.before.html' : 'public/console.html');
+export async function startConsoleFixture({ port = 0, htmlPath, logWrites = false } = {}) {
+  const file = htmlPath || resolve(projectRoot, 'public/console.html');
   await readFile(file); // Fail early rather than displaying a broken preview.
   const state = makeFixtureState();
   const requests = [];
@@ -497,8 +497,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             security: state.security,
             stateDir: state.hardenStateDir
-              ? { hardened: true, path: 'D:\\demo\\qq-bridge\\state', manualCommand: '' }
-              : { hardened: false, path: 'D:\\demo\\qq-bridge\\state', manualCommand: manualDirCommand('D:\\demo\\qq-bridge\\state') }
+              ? { hardened: true, path: 'D:\\demo\\discord-bridge\\state', manualCommand: '' }
+              : { hardened: false, path: 'D:\\demo\\discord-bridge\\state', manualCommand: manualDirCommand('D:\\demo\\discord-bridge\\state') }
           });
           // 令牌与花费：全部为离线示例数据，不含任何真实用量。
           case '/api/tokens/summary': return json(usageSummaryFixture());
@@ -565,13 +565,13 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             if (body.rehardenStateDir === true) {
               // 离线演示：把「重新检测」当成一次成功的收紧（真实实现要管理员权限）
               state.hardenStateDir = true;
-              return json({ ok: true, hardened: true, path: 'D:\\demo\\qq-bridge\\state' });
+              return json({ ok: true, hardened: true, path: 'D:\\demo\\discord-bridge\\state' });
             }
             state.security = body;
             return json({ ok: true });
           case '/api/console/token': return json({ ok: true, token: body.token || 'offline-demo-token-123456', generated: !body.token });
           case '/api/test-send': return json({ ok: true, message_id: 'mock-message-001' });
-          // 语音试发（操作者通道）：离线只回执，不产生任何真实 QQ 消息
+          // 语音试发（操作者通道）：离线只回执，不产生任何真实 Discord 消息
           case '/api/voice/send': return json(body.dryRun
             ? { ok: true, dryRun: true, target: body.target, file: body.file, detail: '2秒 · 20.0 KB · mp3 · 24.0kHz · 单声道', verified: false }
             : { ok: true, target: body.target, file: body.file, detail: '2秒 · 20.0 KB · mp3', messageId: 9001, verified: true, limits: { maxSeconds: 300, maxBytes: 20971520, maxPerMinute: 2, maxPerHour: 10 } });
@@ -618,7 +618,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const value = name => args.find(x => x.startsWith(`${name}=`))?.slice(name.length + 1);
-  const fixture = await startConsoleFixture({ port: Number(value('--port') || 4173), original: args.includes('--original'), htmlPath: value('--html') ? resolve(value('--html')) : undefined, logWrites: true });
+  const fixture = await startConsoleFixture({ port: Number(value('--port') || 4173), htmlPath: value('--html') ? resolve(value('--html')) : undefined, logWrites: true });
   console.log(`Offline console preview: ${fixture.url}\nAll data is synthetic; writes stay in memory.\nRecorded requests: ${fixture.url}/__fixture/requests`);
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { await fixture.close(); process.exit(0); });
 }

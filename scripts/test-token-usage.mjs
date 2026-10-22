@@ -35,7 +35,7 @@ function assert(cond, label) {
 }
 function near(a, b, eps = 1e-9) { return Math.abs(a - b) <= eps; }
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-token-ledger-'));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-ledger-'));
 const ledgerFile = path.join(tmpDir, 'token-usage.jsonl');
 function freshLedger(opts = {}) {
   try { fs.unlinkSync(ledgerFile); } catch {}

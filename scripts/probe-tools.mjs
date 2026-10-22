@@ -1,6 +1,7 @@
-// 端到端验证 QQ preset 的「工具面」与「工具协议」：
+// 端到端验证 Discord preset 的「工具面」与「工具协议」：
 //  1. 建会话挂 preset（dc-chat / dc-chat-v2）
-//  2. 注入一条 prompt，要求 agent 调 mcp__snowluma-host__snowluma_status（不依赖 SnowLuma 在线）
+//  2. 注入一条 prompt，要求 agent 调 mcp__discord__chat_get_prompt（不依赖桥接在线：
+//     没有令牌时工具会返回错误，但 tool/call 已经能观测到）
 //  3. 观测 turn 事件里的 tool/call 与 tool/result，确认 MCP 工具真的可调用
 //  4. 同时确认本地危险工具（pwsh/bash 等）不在工具面里
 import { randomUUID } from 'node:crypto';
@@ -45,7 +46,7 @@ const done = new Promise((resolve) => {
       const p = await rpc('session/prompt', {
         request: {
           sessionId, requestId: randomUUID(), mode: 'queue',
-          content: [{ type: 'text', text: '请调用 mcp__snowluma-host__snowluma_status 工具一次，然后只回复：完成' }]
+          content: [{ type: 'text', text: '请调用 mcp__discord__chat_get_prompt 工具一次（不带参数，报错也没关系），然后只回复：完成' }]
         }
       });
       console.log('prompt ->', JSON.stringify(p).slice(0, 120));
@@ -72,16 +73,16 @@ console.log('最终文本:', JSON.stringify(text.slice(0, 200)));
 console.log('tool/call:', JSON.stringify(toolCalls));
 console.log('tool/result:', JSON.stringify(toolResults));
 
-const calledMcp = toolCalls.some((c) => String(c.name).startsWith('mcp__snowluma-host__'));
+const calledMcp = toolCalls.some((c) => String(c.name).startsWith('mcp__discord__'));
 const calledLocal = toolCalls.some((c) => /^(pwsh|bash|write|edit|read|glob|grep)$/.test(String(c.name)));
 console.log('\n判定:');
-console.log(`  MCP 工具可调用          : ${calledMcp ? '✅' : '❌ 未观测到 mcp__snowluma-host__ 调用'}`);
+console.log(`  MCP 工具可调用          : ${calledMcp ? '✅' : '❌ 未观测到 mcp__discord__ 调用'}`);
 console.log(`  未调用本地危险工具      : ${calledLocal ? '❌ 出现了本地工具调用' : '✅'}`);
 
 try { socket.close(); } catch {}
 await rpc('workspace/archiveSession', { request: { sessionId } });
 // 探针工作区也一并删掉：`workspace/create` 建的条目会一直留在 DSH 侧栏里，
-// 每跑一次探针就多一个（`qq-bridge-probe-tools` 这类名字就是这么来的）。
+// 每跑一次探针就多一个（`discord-bridge-probe-tools` 这类名字就是这么来的）。
 try { await rpc('workspace/delete', { request: { workspaceId: wsId } }); } catch {}
 // 工作区删完目录还在临时区里（空目录 + 会话已归档），一并清掉，别让探针留垃圾。
 try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}

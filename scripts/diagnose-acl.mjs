@@ -8,7 +8,7 @@
 // 而从 `danger-full-access` 会话（或无沙箱的普通终端）跑同样的操作却完全正常。
 //
 // 本项目**故意**对 `state/` 与 `config.json` 这么做（见 src/state-acl.mjs：
-// state/ 里有控制台令牌、SnowLuma OneBot 令牌与全部 QQ 聊天记录）。这是有意的安全取舍，
+// state/ 里有控制台令牌与全部聊天记录，config.json 里有 Discord bot token）。这是有意的安全取舍，
 // 不是 bug —— 但它有个必须知道的副作用：
 //
 //   ⚠️ **在 DSH 沙箱会话里，任何写 `state/` 的操作都会被系统拒绝。**
@@ -126,7 +126,7 @@ if (expected.length) {
   console.log('       NT AUTHORITY\\Authenticated Users : Modify');
   console.log('       BUILTIN\\Users                    : ReadAndExecute');
   console.log('     那正是 harden-state-acl.mjs 专门去掉的两条 —— 等于把控制台令牌、');
-  console.log('     SnowLuma OneBot 令牌与全部 QQ 聊天记录重新开放给本机任何已登录用户。');
+  console.log('     Discord bot token 与全部聊天记录重新开放给本机任何已登录用户。');
   console.log('     `state/` 与 `config.json` 的正确姿态就是「保持收紧 + 不要从沙箱里写它」。');
 }
 

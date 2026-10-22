@@ -2,7 +2,7 @@
 //
 // 为什么需要这个文件
 // ------------------
-// 桥接退役/重置 QQ 会话时走 `api.stopSessionWork(sessionId)`：先清掉 DSH 侧还没跑的
+// 桥接退役/重置聊天会话时走 `api.stopSessionWork(sessionId)`：先清掉 DSH 侧还没跑的
 // 待处理队列，再取消当前 turn。0.2.0 把这步依赖的基线形状从
 // `session/control` 的 `value.queues[<id>]` 换成了
 // `value.projections[<id>].values.inbox` 之后，**每一次**退役都会抛
@@ -67,7 +67,7 @@ async function sampleControlBaseline(cookie) {
   });
 }
 
-const probeDir = path.join(os.tmpdir(), 'qq-bridge-retire-test');
+const probeDir = path.join(os.tmpdir(), 'discord-bridge-retire-test');
 fs.rmSync(probeDir, { recursive: true, force: true });
 fs.mkdirSync(probeDir, { recursive: true });
 

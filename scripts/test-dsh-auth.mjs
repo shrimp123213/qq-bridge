@@ -82,7 +82,7 @@ check('NodeApiClient 走的是 minted 策略', client._strategy === 'minted', St
 
 // 回归：remote.mux 流结束（WS 抖动 / DSH 重启 / 服务端回收）会调用 invalidateAuth()，
 // 那是**常态事件**。曾经这里会顺手把策略钉到 launch token 上，于是一次普通断线就让
-// 客户端永久改用日志里那个过期 token，此后所有 RPC 401，QQ 消息全部静默堆积。
+// 客户端永久改用日志里那个过期 token，此后所有 RPC 401，Discord 消息全部静默堆积。
 for (let i = 0; i < 3; i += 1) {
   client.invalidateAuth();
   const again = await client.callUnary('settings/describe', {});
