@@ -2,8 +2,8 @@
 //
 // 为什么必须有这个文件
 // --------------------
-// `QSH_PLAN.md` §0.1 的结论是：QQ 动作闸门全部跑在桥接进程内，而 OneBot 的
-// 127.0.0.1:3000 HTTP 接口可被任何本机进程用 Bearer token 直接调用。因此
+// Discord 动作闸门全部跑在桥接进程内，而 bot token 就放在本机的 config.json 里，
+// 任何能读本地文件、能跑命令的进程都可以拿它直接调用 Discord API。因此
 // **"仿真会话拿不到 shell"是整个分层安全模型唯一的真边界**。
 //
 // 但在此之前没有任何断言检查过这件事：
@@ -28,9 +28,11 @@ import { collectDshToolNames as collectDshToolNamesShared } from './dsh-tool-nam
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PRESETS_DIR = path.join(ROOT, 'dsh', 'agent-presets');
+/** 两个仿真 preset 共用的唯一守卫实现（preset 源里的 ./discord-tool-restrict.mjs 只是占位）。 */
+const GUARD_PATH = path.join(ROOT, 'plugins', 'discord-agent-presets', 'discord-tool-restrict.mjs');
 
 /** 仿真模式使用的 preset（不允许有任何本地执行能力）。 */
-const SIMULATION_PRESETS = ['qq-chat', 'qq-chat-v2'];
+const SIMULATION_PRESETS = ['dc-chat', 'dc-chat-v2'];
 
 /** 封闭 agent 的 preset：按设计**允许**完整本地工具面。 */
 const CLOSED_AGENT_PRESETS = ['qsh-closed'];
@@ -39,7 +41,7 @@ const CLOSED_AGENT_PRESETS = ['qsh-closed'];
  * 本地执行能力清单。
  *
  * ⚠️ 这里**必须**含每一个能执行本地命令、读写本地文件或派生 agent 的工具名。
- * 名字取自 DSH 0.1.7-rc.2 实际注册的工具（见 qq-tool-restrict.mjs 的注释）。
+ * 名字取自 DSH 0.1.7-rc.2 实际注册的工具（见 discord-tool-restrict.mjs 的注释）。
  * 2026-09-27 的对账替换：`cordis_define`/`cordis_undefine`/`cordis_run`/`cordis_stop`
  * 在 0.1.7 里已不存在（dsh-tool-cordis 现在只注册 cordis_inspect_list/query），
  * 同一轮补上 `load_workspace_dependencies`（自带 Python/Node/pnpm 路径）与
@@ -109,10 +111,9 @@ function collectDshToolNames() {
 /** 允许出现在名单里、但不属于"本地执行"语义的名字（开发/注入器）。 */
 const DEV_TOOL_PREFIX = /^dev_/;
 
-/** 允许出现的 MCP 命名空间前缀（QQ 动作面）。 */
+/** 允许出现的 MCP 命名空间前缀（Discord 动作面）。 */
 const EXPECTED_SAFE_PREFIXES = [
-  'mcp__snowluma__',
-  'mcp__snowluma-host__',
+  'mcp__discord__',
   'mcp__web-search-safe__',
 ];
 
@@ -130,14 +131,14 @@ test('模拟会话的 preset 都挂了工具守卫（否则 L7 没有任何载�
     const { yml } = readPreset(id);
     assert.match(
       yml,
-      /qq-tool-restrict/,
-      `${id} 必须挂载 qq-tool-restrict（L7 的落点），否则本地工具会随全局层继承进来`,
+      /discord-tool-restrict/,
+      `${id} 必须挂载 discord-tool-restrict（L7 的落点），否则本地工具会随全局层继承进来`,
     );
     // 源文件里仍是 preset 目录内的相对名；DSH 0.1.7 下真正装进 DSH 的是 bundle patch
     // （scripts/build-agent-preset-patches.mjs 生成），那里会把它改写成从 profile 目录
-    // 可解析的 `qq-agent-presets/qq-tool-restrict.mjs`——这条断言钉的是"源里必须有守卫行"，
+    // 可解析的 `discord-agent-presets/discord-tool-restrict.mjs`——这条断言钉的是"源里必须有守卫行"，
     // 改写结果由 test-agent-preset-patches.mjs 钉住。
-    assert.match(yml, /\.\/qq-tool-restrict\.mjs/, `${id} 的守卫要指向本目录的 .mjs`);
+    assert.match(yml, /\.\/discord-tool-restrict\.mjs/, `${id} 的守卫行要用 ./discord-tool-restrict.mjs 占位`);
   }
 });
 
@@ -152,10 +153,9 @@ test('模拟会话的 preset 不得挂载 tool-web 的 search/fetch', () => {
 });
 
 test('守卫的 restrict 名单覆盖每一个已知本地执行工具', async () => {
+  assert.ok(fs.existsSync(GUARD_PATH), '守卫文件存在');
   for (const id of SIMULATION_PRESETS) {
-    const { dir } = readPreset(id);
-    const guardPath = path.join(dir, 'qq-tool-restrict.mjs');
-    assert.ok(fs.existsSync(guardPath), `${id} 的守卫文件存在`);
+    readPreset(id);
 
     // 用假 tools 服务调用真实守卫，捕获它实际下发的 restrict 请求。
     const restricted = new Set();
@@ -163,7 +163,7 @@ test('守卫的 restrict 名单覆盖每一个已知本地执行工具', async (
       restrict({ deny }) { for (const n of deny ?? []) restricted.add(n); },
       guard(fn) { this._guard = fn; },
     };
-    const mod = await import(pathToFileURL(guardPath).href);
+    const mod = await import(pathToFileURL(GUARD_PATH).href);
     mod.apply({ tools: fakeTools });
 
     const violations = LOCAL_EXECUTION_TOOLS.filter((t) => !restricted.has(t));
@@ -189,8 +189,8 @@ test('守卫导出的名单与本测试的清单一致（防两份名单各自�
   // 先前这个测试只是"复制"名单的前 19 个名字，导致守卫里多出的 7 个名字
   // 从来没被断言过。现在改为**导入**守卫自己导出的数组，两边不可能漂移。
   for (const id of SIMULATION_PRESETS) {
-    const { dir } = readPreset(id);
-    const mod = await import(pathToFileURL(path.join(dir, 'qq-tool-restrict.mjs')).href);
+    readPreset(id);
+    const mod = await import(pathToFileURL(GUARD_PATH).href);
     assert.ok(
       Array.isArray(mod.RESTRICTED_TOOL_NAMES) && mod.RESTRICTED_TOOL_NAMES.length > 0,
       `${id}: 守卫必须导出 RESTRICTED_TOOL_NAMES，供测试对账`,
@@ -217,8 +217,8 @@ test('守卫名单里的每个名字都是 DSH 真实注册的工具（防拼错
     return;
   }
   for (const id of SIMULATION_PRESETS) {
-    const { dir } = readPreset(id);
-    const mod = await import(pathToFileURL(path.join(dir, 'qq-tool-restrict.mjs')).href);
+    readPreset(id);
+    const mod = await import(pathToFileURL(GUARD_PATH).href);
     const fabricated = mod.RESTRICTED_TOOL_NAMES
       .filter((n) => !DEV_TOOL_PREFIX.test(n) && !OPTIONAL_BUNDLE_TOOLS.has(n) && !dshNames.has(n));
     assert.deepEqual(fabricated, [],
@@ -227,12 +227,11 @@ test('守卫名单里的每个名字都是 DSH 真实注册的工具（防拼错
   }
 });
 
-test('守卫仍放行 QQ MCP 命名空间与无害模型侧工具', async () => {
+test('守卫仍放行 Discord MCP 命名空间与无害模型侧工具', async () => {
   for (const id of SIMULATION_PRESETS) {
-    const { dir } = readPreset(id);
-    const guardPath = path.join(dir, 'qq-tool-restrict.mjs');
+    readPreset(id);
     const fakeTools = { restrict() {}, guard(fn) { this._guard = fn; } };
-    const mod = await import(pathToFileURL(guardPath).href);
+    const mod = await import(pathToFileURL(GUARD_PATH).href);
     mod.apply({ tools: fakeTools });
 
     for (const prefix of EXPECTED_SAFE_PREFIXES) {
@@ -256,7 +255,7 @@ test('守卫仍放行 QQ MCP 命名空间与无害模型侧工具', async () => 
 
 test('封闭 agent 的预设在创建后必须与仿真 preset 明确区分', () => {
   // qsh-closed 由 ADR 0003 定义为**故意**拥有完整本地工具面：它的守卫只负责
-  // "哪些 QQ 动作可见"，不负责"本地工具权限边界"。
+  // "哪些 Discord 动作可见"，不负责"本地工具权限边界"。
   //
   // ⚠️ 这条断言初版是**恒真**的：qsh-closed 还不存在，`if (!exists) continue`
   // 直接跳过整个函数体，永远不会失败——一个永远不会失败的测试不如没有。
@@ -269,10 +268,10 @@ test('封闭 agent 的预设在创建后必须与仿真 preset 明确区分', ()
   }
   for (const id of present) {
     const yml = fs.readFileSync(path.join(PRESETS_DIR, id, 'agent.cordis.yml'), 'utf8');
-    assert.match(yml, /qq-tool-restrict/, `${id} 也应挂守卫（用于 QQ 动作可见性）`);
+    assert.match(yml, /discord-tool-restrict/, `${id} 也应挂守卫（用于 Discord 动作可见性）`);
     // 与仿真 preset 的关键区别：封闭 agent 必须能拿到本地工具 ⇒
     // 它的守卫不得把本地执行工具写进 restrict 名单。
-    const guard = fs.readFileSync(path.join(PRESETS_DIR, id, 'qq-tool-restrict.mjs'), 'utf8');
+    const guard = fs.readFileSync(path.join(PRESETS_DIR, id, 'discord-tool-restrict.mjs'), 'utf8');
     for (const tool of ['pwsh', 'read', 'write']) {
       assert.ok(
         !new RegExp(`['"]${tool}['"]`).test(guard),

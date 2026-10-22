@@ -3,7 +3,7 @@
 // 安全设计：
 // - 只暴露只读工具 `web_search` 与 `web_fetch`：查网络用语/梗/黑话、抓取网页正文。
 // - 不暴露任何本地文件、命令执行、写操作。
-// - 查询词做基础清洗：去 CQ 码、控制字符、超长截断。
+// - 查询词做基础清洗：去控制字符、超长截断。
 // - 搜索：优先走 **DSH 同一路 DeepSeek 联网搜索**（src/web-search.js：同一端点/模型/
 //   服务端 web_search 工具，凭据取 config/env/DSH 的 .credentials.yaml），
 //   不可用时回退 Bing（RSS 优先）。搜索词不再默认发给 Bing。
@@ -41,8 +41,6 @@ function projectRoot() {
 
 function sanitizeQuery(query) {
   return String(query ?? '')
-    // 去掉 CQ 码（[CQ:xxx]）
-    .replace(/\[CQ:[^\]]*\]/gi, ' ')
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

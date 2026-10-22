@@ -11,7 +11,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 夹具放系统临时目录，**不要**放仓库的 state/：harden-state-acl.mjs 会把 state/ 的
 // 继承 ACE 去掉（只留当前用户 / SYSTEM / Administrators），于是 DSH 沙箱的能力 SID
 // 不在 ACL 里，在沙箱内跑这个测试会直接 EPERM 建目录。
-const tmpHome = path.join(os.tmpdir(), 'qq-bridge-setup-test-home');
+const tmpHome = path.join(os.tmpdir(), 'discord-bridge-setup-test-home');
 fs.rmSync(tmpHome, { recursive: true, force: true });
 fs.mkdirSync(path.join(tmpHome, 'profiles', 'web'), { recursive: true });
 fs.mkdirSync(path.join(tmpHome, 'plugins'), { recursive: true });
@@ -20,24 +20,24 @@ fs.mkdirSync(path.join(tmpHome, 'plugins'), { recursive: true });
 const legacyPatch = `# legacy profile patch
 []
 - insert:
-    - id: mcp-snowluma
+    - id: mcp-discord
       name: '@deepseek-ai/dsh-mcp-client'
       config:
-        serverName: snowluma
+        serverName: discord
         transport: stdio
         command: node
         args:
-          - 'old/path/mcp-snowluma-safe.js'
+          - 'old/path/mcp-discord-safe.js'
 
 - insert:
-    - id: mcp-snowluma-host
+    - id: mcp-web-search-safe
       name: '@deepseek-ai/dsh-mcp-client'
       config:
-        serverName: snowluma-host
+        serverName: web-search-safe
         transport: stdio
         command: node
         args:
-          - 'old/path/mcp-host-server.js'
+          - 'old/path/mcp-web-search-safe.js'
 `;
 fs.writeFileSync(path.join(tmpHome, 'profiles', 'web', 'cordis.patch.yml'), legacyPatch, 'utf8');
 fs.writeFileSync(path.join(tmpHome, 'profiles', 'web', 'package.json'), JSON.stringify({
@@ -48,7 +48,7 @@ fs.writeFileSync(path.join(tmpHome, 'profiles', 'web', 'package.json'), JSON.str
 
 // 用指向本仓库插件的 junction 冒充上一轮已安装的插件链接（与真实安装形态一致），
 // 这样脚本会走「已存在且指向本仓库 → 跳过」的正常分支。
-fs.symlinkSync(path.join(ROOT, 'plugins', 'qq-mode-console'), path.join(tmpHome, 'plugins', 'qq-mode-console'), 'junction');
+fs.symlinkSync(path.join(ROOT, 'plugins', 'discord-mode-console'), path.join(tmpHome, 'plugins', 'discord-mode-console'), 'junction');
 
 function runSetup(label) {
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'setup-dsh.mjs'), 'web'], {
@@ -70,7 +70,7 @@ const finalPatch = fs.readFileSync(path.join(tmpHome, 'profiles', 'web', 'cordis
 
 // 断言 1：每个托管 id 恰好出现一次
 let failed = 0;
-for (const id of ['mcp-snowluma', 'mcp-snowluma-host', 'mcp-web-search-safe']) {
+for (const id of ['mcp-discord', 'mcp-web-search-safe']) {
   const n = finalPatch.split('\n').filter((l) => new RegExp(`^\\s*-\\s*id:\\s*${id}\\s*$`).test(l)).length;
   const ok = n === 1;
   if (!ok) failed += 1;
@@ -102,21 +102,21 @@ if (doc) {
   console.log(`   解析出的 MCP id: ${ids.join(', ')}`);
 }
 
-// 断言 5：profile package.json 含两个 bundle（qq-mode-console + qq-agent-presets），且未破坏其他 bundle
+// 断言 5：profile package.json 含两个 bundle（discord-mode-console + discord-agent-presets），且未破坏其他 bundle
 const pkg = JSON.parse(fs.readFileSync(path.join(tmpHome, 'profiles', 'web', 'package.json'), 'utf8'));
 const bundles = pkg.dsh.profile.bundles;
-const okBundle = bundles.includes('qq-mode-console') && bundles.includes('qq-agent-presets') && bundles.includes('dsh-approval-toast');
+const okBundle = bundles.includes('discord-mode-console') && bundles.includes('discord-agent-presets') && bundles.includes('dsh-approval-toast');
 console.log(`${okBundle ? '✅' : '❌'} profile bundles 正确: ${bundles.join(', ')}`);
 if (!okBundle) failed += 1;
-const depOk = String(pkg.dependencies['qq-agent-presets'] ?? '').startsWith('link:')
-  && String(pkg.dependencies['qq-mode-console'] ?? '').startsWith('link:');
+const depOk = String(pkg.dependencies['discord-agent-presets'] ?? '').startsWith('link:')
+  && String(pkg.dependencies['discord-mode-console'] ?? '').startsWith('link:');
 console.log(`${depOk ? '✅' : '❌'} link: 依赖已登记（preset 子行的裸说明符靠它解析）`);
 if (!depOk) failed += 1;
 
-// 断言 6：DSH 0.1.7 机制 —— preset 由 qq-agent-presets bundle 的 patch 层装配，
+// 断言 6：DSH 0.1.7 机制 —— preset 由 discord-agent-presets bundle 的 patch 层装配，
 // 旧目录 ~/.dsh/.agent-presets 不再写入（也不删除用户数据）。
-for (const p of ['qq-chat', 'qq-chat-v2']) {
-  const patchFile = path.join(ROOT, 'plugins', 'qq-agent-presets', 'presets', `${p}.patch.yml`);
+for (const p of ['dc-chat', 'dc-chat-v2']) {
+  const patchFile = path.join(ROOT, 'plugins', 'discord-agent-presets', 'presets', `${p}.patch.yml`);
   const text = fs.existsSync(patchFile) ? fs.readFileSync(patchFile, 'utf8') : '';
   const ok = text.includes('@deepseek-ai/dsh-agent-preset') && new RegExp(`^\\s+id: ${p}$`, 'm').test(text);
   console.log(`${ok ? '✅' : '❌'} preset ${p} 的 patch 层就绪（含 @deepseek-ai/dsh-agent-preset 行 + config.id）`);

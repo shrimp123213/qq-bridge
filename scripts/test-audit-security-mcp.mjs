@@ -5,7 +5,6 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { test } from 'node:test';
 import { z } from 'zod';
-import * as capabilities from '../src/platform/capabilities.js';
 
 function loadWebTools({ safeFetch, webSearch }) {
   const tools = new Map();
@@ -41,7 +40,7 @@ test('MCP search sanitizes the query and delegates to the shared web-search modu
       return { query, provider: 'deepseek', results: [{ title: 'Fixture title', url: 'https://example.com/', snippet: 'Fixture summary' }] };
     }
   });
-  const result = await callTool('web_search', { query: '  fixture [CQ:at,qq=1]\n phrase  ' });
+  const result = await callTool('web_search', { query: '  fixture\u0000\n phrase  ' });
   const parsed = JSON.parse(result.content[0].text);
   assert.equal(parsed.query, 'fixture phrase');
   assert.equal(parsed.provider, 'deepseek');
@@ -68,18 +67,18 @@ test('empty searches are rejected without calling the transport', async () => {
     safeFetch: async () => { assert.fail('Unexpected transport call'); },
     webSearch: async () => { assert.fail('Unexpected search call'); },
   });
-  const result = await callTool('web_search', { query: '[CQ:at,qq=1]\n ' });
+  const result = await callTool('web_search', { query: '\u0000\n ' });
   assert.equal(result.isError, true);
 });
 
 /**
- * 用假 transport 加载 mcp-snowluma-safe.js，拿到它的工具回调。
- * 只需要把 fetch（桥接 API / OneBot HTTP）、http（长轮询）、McpServer、zod、两个本地纯模块塞进上下文。
+ * 用假 transport 加载 mcp-discord-safe.js，拿到它的工具回调。
+ * 只需要把 fetch（桥接 API）、http（长轮询）、McpServer、zod、两个本地纯模块塞进上下文。
  */
-function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null, fixtureMode = 'closed-agent') {
+function loadChatTools(fetchImpl, fixtureConfig = null, httpImpl = null, fixtureMode = 'closed-agent') {
   const tools = new Map();
   // vm 里没有 ESM 的 import.meta，把模块顶部的 __dirname 推导整段替换成固定值。
-  const source = fs.readFileSync(new URL('../src/mcp-snowluma-safe.js', import.meta.url), 'utf8')
+  const source = fs.readFileSync(new URL('../src/mcp-discord-safe.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gm, '')
     .replace("const __dirname = path.dirname(fileURLToPath(import.meta.url));", "const __dirname = '/fixture/src';")
     .replace('await server.connect(new StdioServerTransport());', 'server.connect(new StdioServerTransport());');
@@ -96,9 +95,7 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null, fix
       return fs.readFileSync(file, ...args);
     },
   };
-  // 旧只读工具在**注册期**就按桥接模式收敛（见 mcp-snowluma-safe.js 顶部的说明）。
-  // 注册发生在模块加载期，所以这里必须把 state/mode.json 也桩掉 —— 否则测试会跟着
-  // 开发者本机当前模式漂移（本机常驻 reserved2，会把整批旧工具断言变成"没注册"）。
+  // 工具在模块加载期注册；把 state/mode.json 也桩掉，免得测试跟着开发者本机当前模式漂移。
   const modeAwareFs = {
     ...fixtureFs,
     readFileSync(file, ...args) {
@@ -124,7 +121,6 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null, fix
     fs: modeAwareFs,
     SENSITIVE_RE: { test: () => false },
     serializeModelData: (value) => JSON.stringify(value),
-    ...capabilities,
   });
   const callTool = async (name, arguments_ = {}) => {
     const tool = tools.get(name);
@@ -161,7 +157,7 @@ test('chat_wait_for_messages uses the node:http long-poll channel, not fetch', a
       return req;
     }
   };
-  const callTool = loadSnowlumaTools(
+  const callTool = loadChatTools(
     async () => { assert.fail('wait 不得再走 fetch（会被 undici 的 300s headersTimeout 掐断）'); },
     null,
     fakeHttp
@@ -181,7 +177,7 @@ test('chat_wait_for_messages uses the node:http long-poll channel, not fetch', a
 // "[object Object]"（r3 的已知未修项里就有一条线上记录：chat_wait_for_messages 报
 // `error: "\"Error: [object Object]\""`）。必须序列化成可读文本。
 test('object-shaped bridge errors are rendered readably, not as [object Object]', async () => {
-  const callTool = loadSnowlumaTools(async () => Response.json(
+  const callTool = loadChatTools(async () => Response.json(
     { ok: false, error: { code: 'send/rejected', message: '消息含敏感信息，已阻止发送' } },
     { status: 200 },
   ));
@@ -196,7 +192,7 @@ test('object-shaped bridge errors are rendered readably, not as [object Object]'
 // agentApi 若不检查 body.ok，就会把「被拦截」当成「发送成功」报给模型 ——
 // 模型据此认为消息已发出，既不再重试也不告诉用户，是典型的静默错误。
 test('a bridge 200 with ok:false is reported to the model as a failure', async () => {
-  const callTool = loadSnowlumaTools(async () => Response.json(
+  const callTool = loadChatTools(async () => Response.json(
     { ok: false, error: '消息含敏感信息，已阻止发送' },
     { status: 200 },
   ));
@@ -205,73 +201,36 @@ test('a bridge 200 with ok:false is reported to the model as a failure', async (
   assert.match(result.content[0].text, /阻止发送/);
 });
 
-// 回归：旧只读工具没有会话令牌，只能用在封闭 agent（管理员私聊）里。
-// 桥接的 /api/status 对「带 agent 令牌」的调用返回最小对象（不含 mode 字段），
-// 于是「看到 reserved2 才拒绝」的黑名单写法会判定为假 ⇒ 在二代仿真模式下放行，
-// 把白名单群名、群成员名单注入模型上下文。
-test('legacy read tools fail closed unless the bridge reports closed-agent', async () => {
-  // 注册期模式 = closed-agent（工具确实存在），运行期模式被换掉 → 必须 fail closed。
-  for (const status of [
-    { mode: 'reserved2' }, { mode: 'chat' }, { mode: 'reserved' },
-    {},                       // 无 mode 字段（桥接对 agent 流量返回的最小状态）
-  ]) {
-    const callTool = loadSnowlumaTools(async () => Response.json(status), null, null, 'closed-agent');
-    const result = await callTool('chat_list_groups', {});
-    assert.equal(result.isError, true, `mode=${status.mode ?? '(缺失)'} 时旧只读工具必须拒绝`);
-  }
-  // 只有确认是 closed-agent 才放行
-  const callTool = loadSnowlumaTools(async (url) => {
-    if (String(url).includes('/api/status')) return Response.json({ mode: 'closed-agent' });
-    return Response.json({ status: 'ok', retcode: 0, data: [{ group_id: 456, group_name: 'fixture' }] });
-  }, null, null, 'closed-agent');
-  const result = await callTool('chat_list_groups', {});
-  assert.notEqual(result.isError, true, 'closed-agent 下应放行');
-});
-
-// 新增：旧只读工具必须在**注册期**就按桥接模式收敛（只影响 schema 成本，不影响安全边界）。
-// 背景：实测一份 reserved2 会话的请求头有 58 个工具 / 45.5 KB schema，其中 3 个旧只读工具
-// 必然 403 却照样占位，还诱导模型误调（turn10 踩过一次）。
-test('legacy read tools are not registered at all outside closed-agent', async () => {
-  for (const mode of ['reserved2', 'chat', 'reserved']) {
-    const callTool = loadSnowlumaTools(async () => Response.json({ mode }), null, null, mode);
+// 旧的无令牌只读工具（chat_list_groups / chat_get_group_history）已移除：任何模式下都不得注册，
+// 带令牌的 v2 读工具在任何模式下都该在。
+test('legacy read tools are never registered; v2 read tools always are', async () => {
+  for (const mode of ['reserved2', 'chat', 'reserved', 'closed-agent']) {
+    const callTool = loadChatTools(async () => Response.json({ mode }), null, null, mode);
     assert.equal(callTool.has('chat_list_groups'), false, `${mode} 下不该注册 chat_list_groups`);
     assert.equal(callTool.has('chat_get_group_history'), false, `${mode} 下不该注册 chat_get_group_history`);
-    // 带令牌的 v2 读工具在任何模式下都该在
     assert.equal(callTool.has('chat_get_group_members'), true, `${mode} 下 v2 群成员工具必须可用`);
     assert.equal(callTool.has('chat_get_active_members'), true);
   }
-  const closed = loadSnowlumaTools(async () => Response.json({ mode: 'closed-agent' }), null, null, 'closed-agent');
-  assert.equal(closed.has('chat_list_groups'), true, 'closed-agent 下旧只读工具必须存在');
 });
 
-// 拒绝时绝不能把 config.json 的群白名单回吐给模型。
-// 覆盖两条路：v2 群成员工具（桥接 403）与旧只读历史工具（closed-agent 下才注册）。
+// 拒绝时绝不能把 config.json 的群白名单回吐给模型（v2 群成员工具，桥接 403）。
 test('denied group reads never reveal the group allowlist', async () => {
   const fixtureConfig = { allow: { groups: ['111111', '222222'] } };
   for (const mode of ['reserved2', 'closed-agent']) {
     const calls = [];
-    const callTool = loadSnowlumaTools(async (url) => {
+    const callTool = loadChatTools(async (url) => {
       calls.push(String(url));
       if (String(url).includes('/api/status')) return Response.json({ mode });
       // v2 群成员端点：越权时只回一句通用拒绝，不带白名单
       if (String(url).includes('/api/socialV2/group-members')) {
         return Response.json({ ok: false, error: '目标不在当前模式允许范围内' }, { status: 403 });
       }
-      assert.fail('denied group read must not call OneBot');
+      assert.fail('denied group read must only reach the bridge rejection path');
     }, fixtureConfig, null, mode);
 
     const v2 = await callTool('chat_get_group_members', { key: 'group:999999', token: 'fixture-agent-token' });
     assert.equal(v2.isError, true, `v2 群成员工具在 ${mode} 下必须失败`);
     assert.doesNotMatch(v2.content[0].text, /111111|222222/);
-
-    if (mode === 'closed-agent') {
-      const legacy = await callTool('chat_get_group_history', { groupId: '999999' });
-      assert.equal(legacy.isError, true, 'closed-agent 下非白名单群必须拒绝');
-      assert.doesNotMatch(legacy.content[0].text, /111111|222222/);
-    } else {
-      // reserved2 下旧只读工具根本没注册：连"被拒绝"的机会都不给
-      assert.equal(callTool.has('chat_get_group_history'), false);
-    }
     assert.ok(calls.length >= 1, '应当只经过桥接的鉴权/拒绝路径');
   }
 });

@@ -7,11 +7,11 @@ import {
   SessionRouter,
 } from './session-router.mjs';
 
-const ownerQQ = 42; // Synthetic test identity.
-const ownerKey = `private:${ownerQQ}`;
+const ownerId = 42; // Synthetic test identity.
+const ownerKey = `private:${ownerId}`;
 
 function stateWith(key, policy) {
-  const state = createInitialConversationState(ownerQQ, { closedAgentEnabled: false });
+  const state = createInitialConversationState(ownerId, { closedAgentEnabled: false });
   state.conversations[key] = { updatedBy: 'console', ...policy };
   return state;
 }
@@ -21,15 +21,23 @@ test('conversation keys remove leading zeros and surrounding whitespace', () => 
   assert.equal(canonicalConversationKey('group:00042'), 'group:42');
 });
 
-test('invalid, zero, and unsafe integer keys never become conversations', () => {
+test('invalid, zero, and over-long keys never become conversations', () => {
   for (const key of ['private:0', 'group:-1', 'group:1.5', 'Group:1',
-    'private:9007199254740992', 'private:1:2', null]) {
+    'private:123456789012345678901', 'private:1:2', null]) {
     assert.equal(canonicalConversationKey(key), null, String(key));
   }
 });
 
+test('snowflake ids above 2^53 stay exact strings', () => {
+  assert.equal(canonicalConversationKey('group:1234567890123456789'), 'group:1234567890123456789');
+  const router = new SessionRouter({ ownerId: '1234567890123456789' });
+  assert.equal(router.ownerId, '1234567890123456789');
+  assert.equal(router.modeFor('private:1234567890123456789'), 'closed-agent');
+  assert.equal(router.modeFor('private:1234567890123456788'), 'simulation');
+});
+
 test('initial owner private is closed-agent and all other channels simulate', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   assert.equal(router.modeFor(ownerKey), 'closed-agent');
   assert.equal(router.presetFor(ownerKey), 'qsh-closed');
   assert.equal(router.modeFor('private:9'), 'simulation');
@@ -40,46 +48,46 @@ test('initial owner private is closed-agent and all other channels simulate', ()
   // `qsh-sim` preset produces a state this very loader rejects (the legacy
   // spelling only accepts the legacy preset), so the persisted default is
   // canonicalised on the way out.
-  const reloaded = new SessionRouter({ ownerQQ, state: router.snapshot() });
+  const reloaded = new SessionRouter({ ownerId, state: router.snapshot() });
   assert.equal(reloaded.defaultMode, router.defaultMode);
   assert.equal(reloaded.presetFor('group:9'), 'qsh-sim');
   assert.equal(reloaded.policyFingerprint('group:9'), router.policyFingerprint('group:9'));
 });
 
-test('missing ownerQQ keeps every conversation in simulation', () => {
+test('missing ownerId keeps every conversation in simulation', () => {
   const router = new SessionRouter();
-  assert.equal(router.ownerQQ, null);
+  assert.equal(router.ownerId, null);
   assert.equal(router.modeFor(ownerKey), 'simulation');
   assert.equal(router.modeFor('group:9'), 'simulation');
 });
 
 test('owner may explicitly disable closed-agent at first run', () => {
-  const state = createInitialConversationState(ownerQQ, { closedAgentEnabled: false });
-  const router = new SessionRouter({ ownerQQ, state });
+  const state = createInitialConversationState(ownerId, { closedAgentEnabled: false });
+  const router = new SessionRouter({ ownerId, state });
   assert.deepEqual(state.conversations, {});
   assert.equal(router.modeFor(ownerKey), 'simulation');
 });
 
-test('invalid ownerQQ is rejected rather than silently trusted', () => {
-  for (const invalid of [0, -1, 'abc', '9007199254740992']) {
-    assert.throws(() => new SessionRouter({ ownerQQ: invalid }), /ownerQQ/);
+test('invalid ownerId is rejected rather than silently trusted', () => {
+  for (const invalid of [0, -1, 'abc', 9007199254740992, '123456789012345678901']) {
+    assert.throws(() => new SessionRouter({ ownerId: invalid }), /ownerId/);
   }
 });
 
 test('closed-agent cannot be the global default', () => {
-  const state = createInitialConversationState(ownerQQ);
+  const state = createInitialConversationState(ownerId);
   state.defaults = { mode: 'closed-agent', preset: 'qsh-closed' };
-  assert.throws(() => new SessionRouter({ ownerQQ, state }), /defaults must remain simulation/);
+  assert.throws(() => new SessionRouter({ ownerId, state }), /defaults must remain simulation/);
 });
 
 test('closed-agent cannot be assigned to a group', () => {
   const state = stateWith('group:8', { mode: 'closed-agent', preset: 'qsh-closed' });
-  assert.throws(() => new SessionRouter({ ownerQQ, state }), /restricted to the owner/);
+  assert.throws(() => new SessionRouter({ ownerId, state }), /restricted to the owner/);
 });
 
 test('closed-agent cannot be assigned to another private conversation', () => {
   const state = stateWith('private:8', { mode: 'closed-agent', preset: 'qsh-closed' });
-  assert.throws(() => new SessionRouter({ ownerQQ, state }), /restricted to the owner/);
+  assert.throws(() => new SessionRouter({ ownerId, state }), /restricted to the owner/);
 });
 
 test('closed-agent is rejected when no owner is configured', () => {
@@ -94,7 +102,7 @@ test('missing and unknown modes fail closed at load', () => {
     { mode: 'mystery', preset: 'qsh-sim' },
     { mode: { toString: () => 'closed-agent' }, preset: 'qsh-closed' },
   ]) {
-    assert.throws(() => new SessionRouter({ ownerQQ, state: stateWith('group:8', policy) }));
+    assert.throws(() => new SessionRouter({ ownerId, state: stateWith('group:8', policy) }));
   }
 });
 
@@ -105,9 +113,9 @@ test('missing, null, unknown, and cross-mode presets fail closed', () => {
     { mode: 'simulation', preset: 'standard' },
     { mode: 'simulation', preset: 'qsh-closed' },
   ]) {
-    assert.throws(() => new SessionRouter({ ownerQQ, state: stateWith('group:8', policy) }));
+    assert.throws(() => new SessionRouter({ ownerId, state: stateWith('group:8', policy) }));
   }
-  assert.throws(() => new SessionRouter({ ownerQQ,
+  assert.throws(() => new SessionRouter({ ownerId,
     state: stateWith(ownerKey, { mode: 'closed-agent', preset: 'qsh-sim' }) }));
 });
 
@@ -117,14 +125,14 @@ test('defaults also require known mode and preset', () => {
     { mode: 'simulation' },
     { mode: 'simulation', preset: 'standard' },
   ]) {
-    const state = createInitialConversationState(ownerQQ);
+    const state = createInitialConversationState(ownerId);
     state.defaults = defaults;
-    assert.throws(() => new SessionRouter({ ownerQQ, state }));
+    assert.throws(() => new SessionRouter({ ownerId, state }));
   }
 });
 
 test('mode, preset, model, and effort resolve independently per conversation', () => {
-  const state = createInitialConversationState(ownerQQ);
+  const state = createInitialConversationState(ownerId);
   state.defaults.model = 'default-model';
   state.defaults.reasoningEffort = 'low';
   state.conversations[ownerKey].model = 'owner-model';
@@ -132,7 +140,7 @@ test('mode, preset, model, and effort resolve independently per conversation', (
   state.conversations['group:8'] = {
     mode: 'simulation', preset: 'qsh-sim-v2', model: null, updatedBy: 'console',
   };
-  const router = new SessionRouter({ ownerQQ, state });
+  const router = new SessionRouter({ ownerId, state });
   assert.deepEqual([router.modeFor(ownerKey), router.presetFor(ownerKey),
     router.modelFor(ownerKey), router.effortFor(ownerKey)],
   ['closed-agent', 'qsh-closed', 'owner-model', 'high']);
@@ -143,7 +151,7 @@ test('mode, preset, model, and effort resolve independently per conversation', (
 });
 
 test('simulation permissions deny local tools and admin commands', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   assert.deepEqual(router.permissionsFor('group:8'), {
     localExecution: false, localFiles: false, adminCommands: false,
   });
@@ -154,13 +162,13 @@ test('simulation permissions deny local tools and admin commands', () => {
 });
 
 test('invalid caller key is rejected instead of receiving default privileges', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   assert.throws(() => router.modeFor('group:0'), /Invalid conversation key/);
-  assert.throws(() => router.permissionsFor('private:9007199254740992'), /Invalid conversation key/);
+  assert.throws(() => router.permissionsFor('private:123456789012345678901'), /Invalid conversation key/);
 });
 
 test('a policy change reports only its canonical conversation key', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   const ownerBefore = router.policyFingerprint(ownerKey);
   const otherBefore = router.policyFingerprint('group:9');
   const result = router.setConversation('group:0008', {
@@ -174,7 +182,7 @@ test('a policy change reports only its canonical conversation key', () => {
 });
 
 test('model and effort edits each change only that conversation fingerprint', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   const groupBefore = router.policyFingerprint('group:8');
   const first = router.setConversation(ownerKey, {
     mode: 'closed-agent', preset: 'qsh-closed', model: 'm1', reasoningEffort: null,
@@ -192,7 +200,7 @@ test('model and effort edits each change only that conversation fingerprint', ()
 });
 
 test('metadata-only edits do not restart a conversation', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   const fingerprint = router.policyFingerprint(ownerKey);
   const result = router.setConversation(ownerKey, {
     mode: 'closed-agent', preset: 'qsh-closed', model: null,
@@ -203,7 +211,7 @@ test('metadata-only edits do not restart a conversation', () => {
 });
 
 test('rejected update leaves all conversation policies unchanged', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   const before = router.snapshot();
   assert.throws(() => router.setConversation('group:8', {
     mode: 'closed-agent', preset: 'qsh-closed', updatedBy: 'console',
@@ -212,7 +220,7 @@ test('rejected update leaves all conversation policies unchanged', () => {
 });
 
 test('removing owner override returns only owner to simulation', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   const groupBefore = router.policyFingerprint('group:8');
   assert.deepEqual(router.deleteConversation(ownerKey, { updatedBy: 'console' }).changedKeys, [ownerKey]);
   assert.equal(router.modeFor(ownerKey), 'simulation');
@@ -221,8 +229,8 @@ test('removing owner override returns only owner to simulation', () => {
 
 test('legacy chat, reserved, and reserved2 migrate explicitly with audit events', () => {
   for (const mode of ['chat', 'reserved', 'reserved2']) {
-    const { state, events } = migrateLegacyMode({ mode, ownerQQ });
-    const router = new SessionRouter({ ownerQQ, state });
+    const { state, events } = migrateLegacyMode({ mode, ownerId });
+    const router = new SessionRouter({ ownerId, state });
     assert.equal(router.modeFor(ownerKey), 'simulation');
     assert.equal(router.modeFor('group:8'), 'simulation');
     assert.equal(events.length, 1);
@@ -232,8 +240,8 @@ test('legacy chat, reserved, and reserved2 migrate explicitly with audit events'
 });
 
 test('legacy closed-agent migrates only to owner private', () => {
-  const { state, events } = migrateLegacyMode({ mode: 'closed-agent', ownerQQ });
-  const router = new SessionRouter({ ownerQQ, state });
+  const { state, events } = migrateLegacyMode({ mode: 'closed-agent', ownerId });
+  const router = new SessionRouter({ ownerId, state });
   assert.equal(router.modeFor(ownerKey), 'closed-agent');
   assert.equal(router.modeFor('group:8'), 'simulation');
   assert.equal(state.conversations[ownerKey].updatedBy, 'migration');
@@ -244,43 +252,43 @@ test('legacy closed-agent without owner is downgraded and audited', () => {
   const { state, events } = migrateLegacyMode({ mode: 'closed-agent' });
   const router = new SessionRouter({ state });
   assert.equal(router.modeFor(ownerKey), 'simulation');
-  assert.match(events[0].reason, /missing ownerQQ/);
+  assert.match(events[0].reason, /missing ownerId/);
 });
 
 test('unknown legacy mode and unsupported state versions fail closed', () => {
-  assert.throws(() => migrateLegacyMode({ mode: 'administrator', ownerQQ }), /Unknown legacy mode/);
-  assert.throws(() => migrateLegacyMode({ ownerQQ }), /Unknown legacy mode/);
-  const state = createInitialConversationState(ownerQQ);
+  assert.throws(() => migrateLegacyMode({ mode: 'administrator', ownerId }), /Unknown legacy mode/);
+  assert.throws(() => migrateLegacyMode({ ownerId }), /Unknown legacy mode/);
+  const state = createInitialConversationState(ownerId);
   state.version = 2;
-  assert.throws(() => new SessionRouter({ ownerQQ, state }), /version 1/);
+  assert.throws(() => new SessionRouter({ ownerId, state }), /version 1/);
 });
 
 test('aliased duplicate keys are rejected rather than overwriting policy', () => {
-  const state = createInitialConversationState(ownerQQ);
+  const state = createInitialConversationState(ownerId);
   state.conversations['private:042'] = {
     mode: 'simulation', preset: 'qsh-sim', updatedBy: 'console',
   };
-  assert.throws(() => new SessionRouter({ ownerQQ, state }), /Duplicate conversation key/);
+  assert.throws(() => new SessionRouter({ ownerId, state }), /Duplicate conversation key/);
 });
 
 
 test('explicit null or damaged state never triggers owner first-run privileges', () => {
-  assert.equal(new SessionRouter({ ownerQQ, state: undefined }).modeFor(ownerKey), 'closed-agent');
+  assert.equal(new SessionRouter({ ownerId, state: undefined }).modeFor(ownerKey), 'closed-agent');
   for (const state of [null, false, {}, { version: 1, defaults: null, conversations: {} }]) {
-    assert.throws(() => new SessionRouter({ ownerQQ, state }), /conversation state|defaults/);
+    assert.throws(() => new SessionRouter({ ownerId, state }), /conversation state|defaults/);
   }
 });
 
 test('persisted conversation without a valid updatedBy is rejected', () => {
-  const state = createInitialConversationState(ownerQQ, { closedAgentEnabled: false });
+  const state = createInitialConversationState(ownerId, { closedAgentEnabled: false });
   state.conversations['group:8'] = { mode: 'simulation', preset: 'qsh-sim' };
-  assert.throws(() => new SessionRouter({ ownerQQ, state }), /updatedBy/);
+  assert.throws(() => new SessionRouter({ ownerId, state }), /updatedBy/);
   state.conversations['group:8'].updatedBy = 'command:private:8';
-  assert.throws(() => new SessionRouter({ ownerQQ, state }), /updatedBy/);
+  assert.throws(() => new SessionRouter({ ownerId, state }), /updatedBy/);
 });
 
 test('setConversation requires a live actor and leaves state untouched on rejection', () => {
-  const router = new SessionRouter({ ownerQQ });
+  const router = new SessionRouter({ ownerId });
   const before = router.snapshot();
   for (const updatedBy of [undefined, '', 'migration', 'first-run', 'command:private:8']) {
     assert.throws(() => router.setConversation('group:8', {
@@ -291,7 +299,7 @@ test('setConversation requires a live actor and leaves state untouched on reject
 });
 
 test('setConversation returns actor, time, and before/after for a valid owner command', () => {
-  const router = new SessionRouter({ ownerQQ, now: () => 1_750_000_000_000 });
+  const router = new SessionRouter({ ownerId, now: () => 1_750_000_000_000 });
   const before = router.policyFor(ownerKey);
   const result = router.setConversation(ownerKey, {
     mode: 'simulation', preset: 'qsh-sim', updatedBy: 'command:' + ownerKey,
@@ -308,7 +316,7 @@ test('setConversation returns actor, time, and before/after for a valid owner co
 });
 
 test('deleteConversation requires an actor and returns a structured audit event', () => {
-  const router = new SessionRouter({ ownerQQ, now: () => 1_750_000_000_001 });
+  const router = new SessionRouter({ ownerId, now: () => 1_750_000_000_001 });
   const beforePolicy = router.policyFor(ownerKey);
   const before = router.snapshot();
   assert.throws(() => router.deleteConversation(ownerKey), /updatedBy/);
@@ -330,7 +338,7 @@ test('deleteConversation requires an actor and returns a structured audit event'
 
 
 test('deleting an absent override is visibly a no-op', () => {
-  const router = new SessionRouter({ ownerQQ, now: () => 1_750_000_000_002 });
+  const router = new SessionRouter({ ownerId, now: () => 1_750_000_000_002 });
   const before = router.policyFor('group:8');
   const result = router.deleteConversation('group:8', { updatedBy: 'console' });
   assert.deepEqual(result.changedKeys, []);
@@ -342,7 +350,7 @@ test('deleting an absent override is visibly a no-op', () => {
 });
 
 test('invalid audit clock cannot commit a policy change', () => {
-  const router = new SessionRouter({ ownerQQ, now: () => Number.NaN });
+  const router = new SessionRouter({ ownerId, now: () => Number.NaN });
   const before = router.snapshot();
   assert.throws(() => router.setConversation(ownerKey, {
     mode: 'simulation', preset: 'qsh-sim', updatedBy: 'console',

@@ -1,11 +1,10 @@
 // 图片/表情链路 + 联网搜索的离线回归。
 //
 // 背景（真实故障，见 2026-10-17 的会话日志）：
-//   1. QQ 表情包的 CDN（gxh.vip.qq.com / p.qpic.cn / multimedia.nt.qq.com.cn）同时有
-//      AAAA/A 记录，而本机只有 IPv4 出口 —— 抢到 AAAA 的那次请求会一直等到 20s 超时，
-//      于是「部分表情包发不出去 / 图片时好时坏」。修复在 safe-fetch 的地址故障切换。
-//   2. 表情包字段（emoji_id/url/summary）以前被丢弃，get_image 对市场表情必然失败后
-//      就没有任何兜底；现在保留字段、表情优先走 CDN、并支持用 emoji_id 推 CDN 地址。
+//   1. 图片 CDN 同时有 AAAA/A 记录，而本机只有 IPv4 出口 —— 抢到 AAAA 的那次请求会一直
+//      等到 20s 超时，于是「图片时好时坏」。修复在 safe-fetch 的地址故障切换。
+//   2. 贴纸字段（url/summary）以前被丢弃，模型只看到「图片」；现在保留 kind/url/summary，
+//      取图只走附件/CDN 的 http(s) 地址。
 //   3. 搜索以前是抓 Bing HTML（结果空/噪声大、部分 query 直接退化）；现在优先复用
 //      DSH 同一路 DeepSeek 联网搜索，Bing RSS 仅作兜底。
 //
@@ -53,138 +52,52 @@ const WEBP_VP8X = (() => {
 })();
 
 // ── 消息段 → 媒体元数据 ─────────────────────────────────────────────────────
-await test('extractMediaFromSegments 保留表情包字段（image / mface / face）', async () => {
+await test('extractMediaFromSegments 保留贴纸字段（image / sticker）', async () => {
   const h = await bridgeHarness();
   try {
     const media = h.extractMediaFromSegments([
-      {
-        type: 'image',
-        data: {
-          file: 'f9-f96bf2d2d93c3530d5eb148f55206fb1.gif',
-          url: 'https://gxh.vip.qq.com/club/item/parcel/item/f9/f96bf2d2d93c3530d5eb148f55206fb1/raw300.gif',
-          summary: '[给你糖吃]',
-          sub_type: 0,
-          emoji_id: 'f96bf2d2d93c3530d5eb148f55206fb1',
-          emoji_package_id: 242139,
-          key: 'a39bbb09c7d85d41'
-        }
-      },
-      {
-        type: 'mface',
-        data: { emoji_id: 'abcdef0123456789abcdef0123456789', url: 'https://gxh.vip.qq.com/x.gif', summary: '[动画表情]' }
-      },
-      { type: 'face', data: { id: '178', url: 'https://example.invalid/f.png', summary: 'doge' } },
-      { type: 'text', data: { text: '普通文字' } }
+      { type: 'image', data: { file: 'cat.png', url: 'https://cdn.discordapp.com/attachments/1/2/cat.png' } },
+      { type: 'sticker', data: { url: 'https://media.discordapp.net/stickers/3.png', summary: '给你糖吃' } },
+      { type: 'text', data: { text: '普通文字' } },
+      { type: 'video', data: { file: 'a.mp4', url: 'https://cdn.discordapp.com/attachments/1/2/a.mp4' } }
     ]);
-    assert.equal(media.length, 3);
+    assert.equal(media.length, 2, '只收图片与贴纸');
     assert.equal(media[0].kind, 'image');
-    assert.equal(media[0].emojiId, 'f96bf2d2d93c3530d5eb148f55206fb1', 'emoji_id 必须保留（否则失去 CDN 兜底）');
-    assert.equal(media[0].emojiPackageId, '242139');
-    assert.equal(media[0].emojiKey, 'a39bbb09c7d85d41');
-    assert.equal(media[0].subType, '0');
-    assert.equal(media[0].summary, '[给你糖吃]');
-    assert.equal(media[1].kind, 'sticker', 'mface 必须被识别为表情包');
-    assert.equal(media[1].emojiId, 'abcdef0123456789abcdef0123456789');
-    assert.equal(media[1].subType, '1');
-    assert.equal(media[2].kind, 'face');
-    assert.equal(media[2].faceId, '178');
-    assert.equal(media[2].url, 'https://example.invalid/f.png');
+    assert.equal(media[0].file, 'cat.png');
+    assert.equal(media[0].url, 'https://cdn.discordapp.com/attachments/1/2/cat.png');
+    assert.equal(media[1].kind, 'sticker', '贴纸必须被识别为表情');
+    assert.equal(media[1].summary, '给你糖吃');
 
-    assert.equal(await h.segmentsToText([{ type: 'mface', data: { summary: '给你糖吃' } }]), '[表情:给你糖吃]');
+    assert.equal(await h.segmentsToText([{ type: 'sticker', data: { summary: '给你糖吃' } }]), '[表情:给你糖吃]');
   } finally { await h.close(); }
 });
 
-// ── 表情包下载：CDN 优先、emoji_id 兜底、普通图片仍走 get_image ──────────────
-await test('fetchOneBotImage 表情优先 CDN，普通图片优先 get_image', async () => {
-  const fetched = [];
-  const h = await bridgeHarness({
-    globals: {
-      safeFetchBuffer: async (url) => { fetched.push(String(url)); return { buffer: GIF, mimeType: 'image/gif' }; }
-    }
-  });
-  try {
-    // ① 表情（有 url）：不调用 get_image，直接抓 CDN
-    const sticker = await h.fetchOneBotImage({
-      kind: 'sticker',
-      url: 'https://gxh.vip.qq.com/club/item/parcel/item/f9/f96bf2d2d93c3530d5eb148f55206fb1/raw300.gif'
-    });
-    assert.ok(sticker?.buffer?.length, '表情必须取到字节');
-    assert.equal(sticker.mimeType, 'image/gif');
-    assert.equal(fetched.at(-1), 'https://gxh.vip.qq.com/club/item/parcel/item/f9/f96bf2d2d93c3530d5eb148f55206fb1/raw300.gif');
-    assert.equal(h.calls.images.length, 0, '表情有 URL 时不应先问网关 get_image（市场表情必然 not found）');
-
-    // ② 表情（没有 url，只有 emoji_id）：按 emoji_id 推 CDN 地址兜底
-    const byId = await h.fetchOneBotImage({
-      kind: 'image',
-      subType: '0',
-      emojiId: 'f96bf2d2d93c3530d5eb148f55206fb1',
-      file: 'f9-f96bf2d2d93c3530d5eb148f55206fb1.gif'
-    });
-    assert.ok(byId?.buffer?.length, '只有 emoji_id 时也要能取到');
-    assert.equal(
-      fetched.at(-1),
-      'https://gxh.vip.qq.com/club/item/parcel/item/f9/f96bf2d2d93c3530d5eb148f55206fb1/raw300.gif',
-      '必须按 emoji_id 推出 CDN 地址'
-    );
-
-    // ②b 连 emoji_id 都没有、只有文件名：从 `<前两位>-<32 位 hex>.gif` 还原
-    const byFile = await h.fetchOneBotImage({
-      kind: 'image',
-      subType: '0',
-      file: 'f9-f96bf2d2d93c3530d5eb148f55206fb1.gif'
-    });
-    assert.ok(byFile?.buffer?.length, '只有文件名时也要能推出 CDN 地址');
-    assert.equal(
-      fetched.at(-1),
-      'https://gxh.vip.qq.com/club/item/parcel/item/f9/f96bf2d2d93c3530d5eb148f55206fb1/raw300.gif',
-      '必须能从文件名还原 emoji_id'
-    );
-
-    // ③ 普通图片（有 file）：get_image 优先，不走 CDN
-    const before = fetched.length;
-    const image = await h.fetchOneBotImage({ kind: 'image', file: 'abc.jpg' });
-    assert.ok(image?.buffer?.length);
-    assert.deepEqual(h.calls.images, ['abc.jpg']);
-    assert.equal(fetched.length, before, '普通图片不应额外抓 URL');
-  } finally { await h.close(); }
-});
-
-await test('emojiCdnCandidates 只接受十六进制 id（防任意 URL 拼接）', async () => {
-  const h = await bridgeHarness();
-  try {
-    const valid = h.emojiCdnCandidates('f96bf2d2d93c3530d5eb148f55206fb1');
-    assert.equal(valid.length, 1);
-    assert.equal(valid[0], 'https://gxh.vip.qq.com/club/item/parcel/item/f9/f96bf2d2d93c3530d5eb148f55206fb1/raw300.gif');
-    for (const bad of ['', 'abc', '../../etc/passwd', 'f96bf2d2d93c3530d5eb148f55206fb1/../../x', '中文', null]) {
-      assert.equal(h.emojiCdnCandidates(bad).length, 0, `非法 emoji_id 不得拼 URL：${bad}`);
-    }
-  } finally { await h.close(); }
-});
-
-await test('fetchMediaData 标注表情/图片，并保留 summary 与 emojiId', async () => {
+await test('fetchMediaData 标注表情/图片，并保留 summary 与 url', async () => {
+  const STICKER_URL = 'https://media.discordapp.net/stickers/3.gif';
   const h = await bridgeHarness({
     globals: {
       safeFetchBuffer: async (url) => {
-        if (String(url).includes('gxh.vip.qq.com')) return { buffer: GIF, mimeType: 'image/gif' };
+        if (String(url) === STICKER_URL) return { buffer: GIF };
         throw new Error('网络不可用');
       }
     }
   });
   try {
-    const out = await h.fetchMediaData([
-      { kind: 'sticker', emojiId: 'f96bf2d2d93c3530d5eb148f55206fb1', summary: '[给你糖吃]' }
-    ]);
+    const out = await h.fetchMediaData([{ kind: 'sticker', url: STICKER_URL, summary: '给你糖吃' }]);
     assert.equal(out.length, 1);
     assert.equal(out[0].kind, 'sticker');
-    assert.equal(out[0].summary, '[给你糖吃]');
-    assert.equal(out[0].emojiId, 'f96bf2d2d93c3530d5eb148f55206fb1');
+    assert.equal(out[0].summary, '给你糖吃');
+    assert.equal(out[0].url, STICKER_URL);
+    assert.equal(out[0].mimeType, 'image/gif');
     assert.ok(out[0].data?.length, '应带 base64 图片数据');
     assert.equal(out[0].text, '');
 
-    h.bot.getImage = async () => { throw new Error('image not found in cache'); };
-    const failed = await h.fetchMediaData([{ kind: 'image', file: 'abc.jpg', url: 'https://multimedia.nt.qq.com.cn/x' }]);
+    const failed = await h.fetchMediaData([{ kind: 'image', file: 'abc.jpg', url: 'https://cdn.discordapp.com/attachments/1/2/abc.jpg' }]);
     assert.equal(failed[0].kind, 'image');
     assert.match(String(failed[0].text), /图片获取失败/, '失败必须明确标注为图片');
+
+    const noUrl = await h.fetchMediaData([{ kind: 'image', file: 'abc.jpg' }]);
+    assert.match(String(noUrl[0].text), /图片获取失败/, '没有地址时同样明确标注失败');
   } finally { await h.close(); }
 });
 
@@ -205,7 +118,7 @@ await test('getImageDimensions / acceptImageBuffer 覆盖 GIF 与 WebP，并拦�
 
 // ── 搜索：配置 / 凭据 / 结果映射 / 解析 ─────────────────────────────────────
 await test('loadSearchConfig 默认值与越界收敛', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-search-cfg-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'search-cfg-'));
   try {
     fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
       webSearch: { provider: 'bing', maxResults: 99, maxUses: 9, timeoutMs: 1, apiKeyEnv: ' MY_KEY ' }
@@ -226,37 +139,37 @@ await test('loadSearchConfig 默认值与越界收敛', async () => {
 });
 
 await test('resolveSearchApiKey 的优先级：config > env > DSH 凭据', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-dsh-home-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-home-'));
   const oldHome = process.env.DSH_HOME;
-  const oldKey = process.env.QQ_TEST_SEARCH_KEY;
+  const oldKey = process.env.BRIDGE_TEST_SEARCH_KEY;
   try {
     fs.writeFileSync(path.join(home, '.credentials.yaml'), [
       'version: 1',
       'refs:',
-      '  QQ_TEST_SEARCH_KEY: sk-from-dsh-credentials',
+      '  BRIDGE_TEST_SEARCH_KEY: sk-from-dsh-credentials',
       'records: {}',
       ''
     ].join('\n'));
     process.env.DSH_HOME = home;
-    delete process.env.QQ_TEST_SEARCH_KEY;
+    delete process.env.BRIDGE_TEST_SEARCH_KEY;
 
-    assert.equal(resolveSearchApiKey({ apiKeyEnv: 'QQ_TEST_SEARCH_KEY' }).source, 'dsh-credentials');
-    assert.equal(readDshCredential('QQ_TEST_SEARCH_KEY'), 'sk-from-dsh-credentials');
+    assert.equal(resolveSearchApiKey({ apiKeyEnv: 'BRIDGE_TEST_SEARCH_KEY' }).source, 'dsh-credentials');
+    assert.equal(readDshCredential('BRIDGE_TEST_SEARCH_KEY'), 'sk-from-dsh-credentials');
 
-    process.env.QQ_TEST_SEARCH_KEY = 'sk-from-env';
-    assert.deepEqual(resolveSearchApiKey({ apiKeyEnv: 'QQ_TEST_SEARCH_KEY' }), { key: 'sk-from-env', source: 'env' });
+    process.env.BRIDGE_TEST_SEARCH_KEY = 'sk-from-env';
+    assert.deepEqual(resolveSearchApiKey({ apiKeyEnv: 'BRIDGE_TEST_SEARCH_KEY' }), { key: 'sk-from-env', source: 'env' });
 
     assert.deepEqual(
-      resolveSearchApiKey({ apiKey: 'sk-from-config', apiKeyEnv: 'QQ_TEST_SEARCH_KEY' }),
+      resolveSearchApiKey({ apiKey: 'sk-from-config', apiKeyEnv: 'BRIDGE_TEST_SEARCH_KEY' }),
       { key: 'sk-from-config', source: 'config' }
     );
 
-    delete process.env.QQ_TEST_SEARCH_KEY;
+    delete process.env.BRIDGE_TEST_SEARCH_KEY;
     fs.writeFileSync(path.join(home, '.credentials.yaml'), 'version: 1\nrefs: {}\nrecords: {}\n');
-    assert.equal(resolveSearchApiKey({ apiKeyEnv: 'QQ_TEST_SEARCH_KEY' }).source, 'none');
+    assert.equal(resolveSearchApiKey({ apiKeyEnv: 'BRIDGE_TEST_SEARCH_KEY' }).source, 'none');
   } finally {
     if (oldHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = oldHome;
-    if (oldKey === undefined) delete process.env.QQ_TEST_SEARCH_KEY; else process.env.QQ_TEST_SEARCH_KEY = oldKey;
+    if (oldKey === undefined) delete process.env.BRIDGE_TEST_SEARCH_KEY; else process.env.BRIDGE_TEST_SEARCH_KEY = oldKey;
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -306,7 +219,7 @@ await test('Bing RSS / HTML 解析：CDATA、实体、去重、上限', async ()
 });
 
 await test('deepseekSearch：没有 key 时报 NO_KEY；非 https 端点直接拒绝', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-dsh-home2-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-home2-'));
   const oldHome = process.env.DSH_HOME;
   const oldKey = process.env.DEEPSEEK_API_KEY;
   try {
@@ -336,7 +249,7 @@ await test('deepseekSearch：没有 key 时报 NO_KEY；非 https 端点直接�
 });
 
 await test('webSearch：provider=deepseek 且无 key 时不静默回退（明确报错）', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-dsh-home3-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-home3-'));
   const oldHome = process.env.DSH_HOME;
   const oldKey = process.env.DEEPSEEK_API_KEY;
   try {
@@ -376,7 +289,7 @@ await test('safe-fetch：多地址时按 IPv4 优先并在失败后切换', asyn
     // 用动态 import 拿到"用这份 DNS 桩解析"的实例：模块在导入时捕获 lookup 引用，
     // 所以先替换再导入（与 test-audit-security 的做法一致）。
     const mod = await import(`../src/safe-fetch.js?failover=${Date.now()}`);
-    assert.deepEqual(await mod.resolveSafeAddresses('p.qpic.cn'), ['116.162.45.14', '2408:8756:f50:4::17']);
+    assert.deepEqual(await mod.resolveSafeAddresses('cdn.discordapp.com'), ['116.162.45.14', '2408:8756:f50:4::17']);
   } finally {
     dns.promises.lookup = original;
   }

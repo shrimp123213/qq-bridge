@@ -1,4 +1,4 @@
-// 媒体归一化：把「QQ 给我们的原始图片」压成「DSH 与模型真能吃下的形状」。
+// 媒体归一化：把「Discord 给我们的原始图片」压成「DSH 与模型真能吃下的形状」。
 //
 // ── 为什么需要这一层（2026-10-18 审计结论，见 docs/audits/AUDIT_2026-10-18_MEDIA_AND_WATERMARK.md）
 //
@@ -18,9 +18,8 @@
 //
 // ── 本模块的取舍
 //
-// · **只动喂给模型的那一份**。收集表情（add_custom_face）必须用原始字节，
-//   所以归一化只接在 fetchMediaData / resolveMediaList / sticker-image 这些「给模型看」的出口，
-//   不去改 fetchOneBotImage / fetchFaceMedia 的返回值。
+// · **只动喂给模型的那一份**。归一化只接在 fetchMediaData / resolveMediaList 这些
+//   「给模型看」的出口，不去改 fetchImageMedia 的返回值（它给的是原始字节）。
 // · **动图抽帧拼图**而不是发多张图：一条消息 5 张图 = 5 次 DSH admission + 5 份 token，
 //   而 3×2 拼图信息密度更高、只算一张图（实测 4.83 MB / 200 帧 → 92 KB / 269 ms）。
 // · **能不动就不动**：小图（≤ maxModelBytes 且长边够小）原样放行，零延迟。
@@ -266,7 +265,7 @@ export function planAnimation(info, limits = {}) {
   const layout = { 2: [2, 1], 3: [3, 1], 4: [2, 2], 5: [3, 2], 6: [3, 2], 7: [4, 2], 8: [4, 2], 9: [3, 3], 10: [5, 2], 11: [4, 3], 12: [4, 3] }[sample]
     ?? [Math.ceil(Math.sqrt(sample)), Math.ceil(sample / Math.ceil(Math.sqrt(sample)))];
   const [cols, rows] = layout;
-  // fps 必须让 ffmpeg 恰好产出 sample 帧；时长未知时按每帧 100 ms 估（QQ 表情的常见默认）。
+  // fps 必须让 ffmpeg 恰好产出 sample 帧；时长未知时按每帧 100 ms 估（GIF 动图的常见默认）。
   const durationMs = info?.durationMs > 0 ? info.durationMs : frames * 100;
   const seconds = Math.max(0.05, durationMs / 1000);
   const fps = Math.min(30, Math.max(0.05, Number((sample / seconds).toFixed(4))));
@@ -314,7 +313,7 @@ function runFfmpeg(ffmpeg, args, { timeoutMs = MEDIA_DEFAULTS.timeoutMs } = {}) 
 function makeTempWorkspace(tmpDir) {
   const base = tmpDir ? path.resolve(tmpDir) : os.tmpdir();
   fs.mkdirSync(base, { recursive: true });
-  return fs.mkdtempSync(path.join(base, 'qqb-media-'));
+  return fs.mkdtempSync(path.join(base, 'bridge-media-'));
 }
 
 function cleanupWorkspace(dir) {

@@ -1,5 +1,5 @@
 // Exercise real bridge HTTP handlers and prompt delivery with isolated files,
-// fixture-only QQ/DSH peers, and no production process or credentials.
+// fixture-only chat/DSH peers, and no production process or credentials.
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
@@ -11,14 +11,19 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 const seqs = (messages) => Array.from(messages, (message) => message.seq);
 let failures = 0;
 let tests = 0;
+// 1×1 PNG：图片 CDN 桩的固定应答；fetchedUrls 记录每个测试里实际抓过的地址。
+const FIXTURE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k3ioAAAAASUVORK5CYII=', 'base64');
+const fetchedUrls = [];
 
 async function test(name, run, { observe = false } = {}) {
   tests++;
-  const h = await bridgeHarness({ config: { socialV2: {
+  fetchedUrls.length = 0;
+  const h = await bridgeHarness({ globals: {
+    safeFetchBuffer: async (url) => { fetchedUrls.push(String(url)); return { url: String(url), statusCode: 200, buffer: FIXTURE_PNG }; }
+  }, config: { socialV2: {
     wake: { preSleepWaitEnabled: observe, preSleepWaitMs: 1000 },
     wait: { minMs: 100, maxMs: 2000, minQuietAfterNewMs: 0 },
     proactive: { enabled: false },
-    sticker: { enabled: false },
   } } });
   h.setMode('reserved2');
   const st = h.getSocialV2State(KEY);
@@ -44,8 +49,8 @@ async function test(name, run, { observe = false } = {}) {
     req.setTimeout(4000, () => req.destroy(new Error('fixture HTTP request timed out')));
     req.end(body === undefined ? undefined : JSON.stringify({ key, ...body }));
   });
-  const append = (text, { key = KEY, id = `fixture-${h.getSocialV2State(key).lastUnreadSeq + 1}`, media = [], forwards = [] } = {}) => {
-    h.appendSocialV2Message(key, 'fixture-person', text, text, false, false, id, media, '789', forwards);
+  const append = (text, { key = KEY, id = `fixture-${h.getSocialV2State(key).lastUnreadSeq + 1}`, media = [] } = {}) => {
+    h.appendSocialV2Message(key, 'fixture-person', text, text, false, false, id, media, '789');
     return h.getSocialV2State(key).lastUnreadSeq;
   };
   try { await run({ h, st, request, append }); console.log('PASS', name); }
@@ -214,7 +219,7 @@ await test('an invalid wake configuration cannot acknowledge an otherwise valid 
   const before = plain(st.wakeConfig);
   const result = await request('wake-config', { body: { throughSeq: 1, config: {
     mode: 'diving', infinite: true, triggers: { atMention: false, nameMention: false, question: false,
-      poke: false, anyMessage: false, probability: 0, keywords: [], speakerIds: [] },
+      anyMessage: false, probability: 0, keywords: [], speakerIds: [] },
   } } });
   assert.equal(result.status, 400);
   assert.deepEqual(seqs(st.unread), [1]);
@@ -379,7 +384,7 @@ await test('snapshot feature and tool flags cannot be bypassed through inline re
 
 await test('a compact image handle still resolves after unread outlives the recent buffer', async ({ h, st, request, append }) => {
   h.cfg.socialV2.context.recentLimit = 1;
-  append('old unread image', { id: '900719925474099312345', media: [{ kind: 'image', file: 'fixture-kept-image' }] });
+  append('old unread image', { id: '900719925474099312345', media: [{ kind: 'image', file: 'fixture-kept-image', url: 'https://images.invalid/fixture-kept-image.png' }] });
   append('newer text');
   assert.deepEqual(seqs(st.recentMessages), [2]);
   assert.deepEqual(seqs(st.unread), [1, 2]);
@@ -391,9 +396,9 @@ await test('a compact image handle still resolves after unread outlives the rece
     assert.equal(result.status, 200);
     assert.equal(result.data.media[0].file, 'fixture-kept-image');
     assert.equal(result.data.images[0].mimeType, 'image/png');
-    assert.ok(result.data.images[0].data.length > 0, 'fixture gateway should return an actual image');
+    assert.ok(result.data.images[0].data.length > 0, 'fixture CDN should return an actual image');
   }
-  assert.deepEqual(h.calls.images, ['fixture-kept-image', 'fixture-kept-image']);
+  assert.deepEqual(fetchedUrls, ['https://images.invalid/fixture-kept-image.png', 'https://images.invalid/fixture-kept-image.png']);
 });
 
 await test('busy and rate-limited wake attempts preserve the current observation state', async ({ h, st, append }) => {
@@ -483,14 +488,12 @@ await test('offline reserved2 wake replay cannot leak into an ordinary chat sess
 await test('real wake delivery inlines compact messages with exact quote and media handles', async ({ h, st, request, append }) => {
   append('fixture-inline-content', { id: '900719925474099312345',
     media: [{ kind: 'image', file: 'fixture-local-image', url: 'https://images.invalid/fixture-secret' }],
-    forwards: ['fixture-forward-123'],
   });
   await h.sendWakePromptV2(KEY, 'question');
   assert.equal(h.calls.prompts.length, 1);
   const text = h.calls.prompts[0].content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
   assert.ok(text.includes('fixture-inline-content'));
   assert.ok(text.includes('900719925474099312345'), 'quote ID must remain an exact string');
-  assert.ok(text.includes('fixture-forward-123'), 'forward handle must remain fetchable');
   assert.ok(text.includes('readThroughSeq'));
   assert.ok(!text.includes('fixture-secret'), 'media URL is unnecessary when the local seq can resolve it');
   const close = await request('wake-config', { body: { config: ACTIVE, throughSeq: 1 } });

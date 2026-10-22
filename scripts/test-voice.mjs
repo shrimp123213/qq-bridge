@@ -2,10 +2,10 @@
 // 1) send-voice-lib 纯函数（来源解析、音频库列举、时长/体积校验、目标 key 解析）
 // 2) 配置项 + MCP 工具 + bridge 路由存在性
 // 3) 安全边界：AI 通道不许绝对路径（默认）、不许 base64/http 来源
-// 4) live 模式（QQ_BRIDGE_TEST_LIVE=1）：对桥接 /api/voice/send 做 dry-run，验证真实链路可解析
+// 4) live 模式（BRIDGE_TEST_LIVE=1）：对桥接 /api/voice/send 做 dry-run，验证真实链路可解析
 //
-// 注意：**默认不真发语音**（真发会产生不可撤回的 QQ 消息）。要真发请用 CLI：
-//   node scripts/send-voice.mjs send "<音频>" group:<群号>
+// 注意：**默认不真发语音**（真发会在 Discord 频道里留下真实消息）。要真发请用 CLI：
+//   node scripts/send-voice.mjs send "<音频>" group:<频道id>
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,8 +14,6 @@ import {
   AUDIO_EXTS, describeAudio, formatBytes, formatDuration,
   inspectAudio, isAudioFile, listAudioFiles, parseTargetKey, resolveAudioSource
 } from '../src/send-voice-lib.js';
-// 独立发语音工具在仓库上一级（不在本仓库里）：位置解析与"不在时怎么跳过"走共享口径。
-import { hasVoiceTool, skipVoiceTool, voiceToolPath } from './voice-tool-locator.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -28,7 +26,7 @@ function ok(cond, name) {
 }
 
 // ── 临时音频库 fixture ─────────────────────────────────────────────────────
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-voice-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-test-'));
 const voiceDir = path.join(tmp, 'audio');
 fs.mkdirSync(path.join(voiceDir, 'sub'), { recursive: true });
 const emptyAudio = path.join(voiceDir, 'empty.mp3');
@@ -42,9 +40,9 @@ fs.writeFileSync(notAudio, 'hello');
 
 console.log('## send-voice-lib 纯函数');
 {
-  ok(isAudioFile('a.mp3') && isAudioFile('A.WAV') && isAudioFile('x.silk'), 'isAudioFile 识别音频扩展名');
+  ok(isAudioFile('a.mp3') && isAudioFile('A.WAV') && isAudioFile('x.ogg'), 'isAudioFile 识别音频扩展名');
   ok(!isAudioFile('a.txt') && !isAudioFile('a'), 'isAudioFile 拒绝非音频');
-  ok(AUDIO_EXTS.includes('.amr') && AUDIO_EXTS.includes('.m4a'), 'AUDIO_EXTS 覆盖 QQ 常见格式');
+  ok(AUDIO_EXTS.includes('.ogg') && AUDIO_EXTS.includes('.m4a'), 'AUDIO_EXTS 覆盖常见格式');
   ok(formatBytes(512) === '512 B' && formatBytes(2048).includes('KB') && formatBytes(3 * 1024 * 1024).includes('MB'), 'formatBytes 分级');
   ok(formatDuration(45) === '45秒' && formatDuration(95) === '1分35秒', 'formatDuration 中文格式');
   ok(parseTargetKey('group:123')?.kind === 'group', 'parseTargetKey 群');
@@ -141,7 +139,7 @@ console.log('## 配置项（AI 发语音默认关闭，等语音库准备好再�
 
 console.log('## MCP 工具与 bridge 路由');
 {
-  const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
+  const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-discord-safe.js'), 'utf8');
   ok(mcp.includes("'chat_send_voice'"), 'MCP 注册 chat_send_voice');
   ok(mcp.includes("'chat_list_voices'"), 'MCP 注册 chat_list_voices');
   ok(mcp.includes("chat_send_voice: 'sendVoice'"), 'chat_send_voice 受 sendVoice 开关控制');
@@ -150,13 +148,13 @@ console.log('## MCP 工具与 bridge 路由');
   ok(voiceBlock.includes('/api/socialV2/send-voice'), 'chat_send_voice 调 /api/socialV2/send-voice');
   ok(!voiceBlock.includes("绝对路径的音频"), 'chat_send_voice 不暴露绝对路径参数');
 
-  // record 段在平台适配层里构造，路由与函数在 bridge.js 里：两份一起查。
-  const bridge = ['src/bridge.js', 'src/platform/qq-onebot.js']
+  // 语音附件在平台适配层里发送，路由与函数在 bridge.js 里：两份一起查。
+  const bridge = ['src/bridge.js', 'src/platform/discord.js']
     .map((rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')).join('\n');
   for (const s of [
     '/api/voice/send', '/api/socialV2/send-voice', '/api/socialV2/voices',
     'sendVoiceV2', 'sendVoiceForV2', 'resolveVoicePathForV2', 'resolveVoicePathForOperator',
-    'voiceBudgetCheck', 'assertOutboundAuditOk', 'type: \'record\''
+    'voiceBudgetCheck', 'assertOutboundAuditOk', 'function sendVoice(kind, id, file)'
   ]) {
     ok(bridge.includes(s), `bridge 包含 ${s}`);
   }
@@ -170,44 +168,23 @@ console.log('## 安全边界（AI 通道来源限制）');
   const fn = bridge.slice(bridge.indexOf('function resolveVoicePathForV2'), bridge.indexOf('function resolveVoicePathForOperator'));
   ok(/base64:|data:|https\?:/.test(fn), 'AI 通道拒绝 base64/data/http 来源');
   ok(/allowAbsolutePath/.test(fn), 'AI 通道检查 allowAbsolutePath');
-  const sendRoute = bridge.slice(bridge.indexOf("url.pathname === '/api/socialV2/send-voice'"), bridge.indexOf("url.pathname === '/api/socialV2/send-sticker'"));
+  const sendRoute = bridge.slice(bridge.indexOf("url.pathname === '/api/socialV2/send-voice'"), bridge.indexOf("url.pathname === '/api/socialV2/voices'"));
   ok(sendRoute.includes('v2SessionAllowed(key)'), '语音发送校验会话白名单');
   ok(sendRoute.includes('agentTokenOk(key, token)'), '语音发送校验 agent token');
   ok(sendRoute.includes('shouldBlockSilentReply(key)'), '语音发送尊重静默模式');
   ok(sendRoute.includes('voiceBudgetCheck'), '语音发送走语音限流');
 }
 
-console.log('## 独立工具（不依赖桥接；已拆到仓库上一级 voice-tool/）');
-if (!hasVoiceTool()) {
-  skipVoiceTool('独立工具的结构断言（voice-cli.mjs 存在性、零依赖、OneBot 动作、共享内核指向、两个启动器）');
-} else {
-  const standalone = voiceToolPath('voice-cli.mjs');
-  ok(fs.existsSync(standalone), 'voice-tool/voice-cli.mjs 存在（独立直连 SnowLuma）');
-  const src = fs.readFileSync(standalone, 'utf8');
-  ok(!/send-voice-lib/.test(src), '独立工具不 import 桥接模块（真正零依赖）');
-  ok(/send_private_msg|send_group_msg/.test(src), '独立工具直接调 OneBot 发送动作');
-  ok(/type: 'record'/.test(src), '独立工具构造 record 段');
-  ok(/get_msg/.test(src), '独立工具做发送后回读校验');
-  ok(/'close'/.test(src) && /readFileSync\(out/.test(src), '独立工具 ffprobe 结果经文件回传（兼容受限沙箱）');
-  ok(/readline/.test(src), '独立工具带交互菜单');
-  // 共享内核只有一份实现：工具必须引 qq-bridge 的，而不是自带副本
-  ok(/from '\.\.\/qq-bridge\/src\/voice-core\.js'/.test(src), '独立工具的语音内核指向 qq-bridge（单一实现）');
-  ok(fs.existsSync(voiceToolPath('发语音.cmd')), 'voice-tool/发语音.cmd 双击启动器存在');
-  ok(fs.existsSync(voiceToolPath('config.example.json')), 'voice-tool/config.example.json 存在');
-  ok(fs.existsSync(path.join(ROOT, '..', '发语音-图形界面.cmd')), '上级 发语音-图形界面.cmd 启动器存在');
-}
-
 console.log('## preset 人设已描述语音能力（否则 AI 不知道自己会说话）');
 {
-  const preset = fs.readFileSync(path.join(ROOT, 'dsh', 'agent-presets', 'qq-chat-v2', 'agent.cordis.yml'), 'utf8');
-  ok(preset.includes('chat_send_voice'), 'qq-chat-v2 人设提到 chat_send_voice');
-  ok(preset.includes('chat_list_voices'), 'qq-chat-v2 人设提到 chat_list_voices');
+  const preset = fs.readFileSync(path.join(ROOT, 'dsh', 'agent-presets', 'dc-chat-v2', 'agent.cordis.yml'), 'utf8');
+  ok(preset.includes('chat_send_voice'), 'dc-chat-v2 人设提到 chat_send_voice');
+  ok(preset.includes('chat_list_voices'), 'dc-chat-v2 人设提到 chat_list_voices');
   ok(preset.includes('verified=true'), '人设说明 verified=true 的语义');
   ok(/不要假装发了语音/.test(preset), '人设禁止假装发语音');
-  // DSH 0.1.7 起守卫的权威实现只有一份，在 qq-agent-presets bundle 里
-  // （dsh/agent-presets/<preset>/qq-tool-restrict.mjs 只是 re-export 壳）。
-  const restrict = fs.readFileSync(path.join(ROOT, 'plugins', 'qq-agent-presets', 'qq-tool-restrict.mjs'), 'utf8');
-  ok(restrict.includes("'mcp__snowluma__'"), 'preset 白名单以前缀放行 mcp__snowluma__*（覆盖语音工具）');
+  // DSH 0.1.7 起守卫的权威实现只有一份，在 discord-agent-presets bundle 里。
+  const restrict = fs.readFileSync(path.join(ROOT, 'plugins', 'discord-agent-presets', 'discord-tool-restrict.mjs'), 'utf8');
+  ok(restrict.includes("'mcp__discord__'"), 'preset 白名单以前缀放行 mcp__discord__*（覆盖语音工具）');
 }
 
 console.log('## 控制台契约');
@@ -273,7 +250,7 @@ console.log('## 回归：长消息里的 URL 不许被切碎（P1，曾静默丢
 {
   // 由来：splitLongSegment 用 \u0000URL<n>\u0000 占位符保护 URL，但对超长片段直接按
   // max 硬切，会拦腰切断占位符 → 还原正则失配 → URL 整条消失 + 裸 NUL + 字面量 "URL0"
-  // 被发进 QQ 消息。这里把函数从 bridge.js 抽出来，对 1..max+20 所有长度做校验。
+  // 被发进聊天消息。这里把函数从 bridge.js 抽出来，对 1..max+20 所有长度做校验。
   const src = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
   const at = src.indexOf('function splitLongSegment');
   ok(at > 0, '在 bridge.js 里找到 splitLongSegment');
@@ -319,15 +296,15 @@ console.log('## 回归：AI 通道的语音库响应不许带出绝对路径（P
   ok(pathLeaks.every((p) => aiVisible.includes('agentCall ?')), '响应里没有无保护的路径插值');
 }
 
-if (process.env.QQ_BRIDGE_TEST_LIVE === '1') {
+if (process.env.BRIDGE_TEST_LIVE === '1') {
   console.log('## live：桥接 voice 端点 dry-run');
   if (!fs.existsSync(path.join(ROOT, 'config.json'))) {
     // live 段要打**真的**桥接：端口、consoleToken、白名单群号、语音库目录全部来自
     // 用户本机 config.json。config.example.json 给不出这些（groups 是空的），
     // 硬跑只会得到"前置条件不足"这种假失败 —— 如实跳过（措辞与 skipVoiceTool 同款）。
     console.log('  ⏭  跳过：live 段需要本机 config.json（端口/consoleToken/白名单群号/语音库目录）');
-    console.log('     原因：config.json 被 .gitignore（含真实 QQ 号/token），config.example.json 给不出这些值');
-    console.log('     想跑这段：先照 config.example.json 建好自己的 config.json，再设 QQ_BRIDGE_TEST_LIVE=1。');
+    console.log('     原因：config.json 被 .gitignore（含真实用户 id/token），config.example.json 给不出这些值');
+    console.log('     想跑这段：先照 config.example.json 建好自己的 config.json，再设 BRIDGE_TEST_LIVE=1。');
     console.log('     注意：这是**跳过，不是通过** —— 这台机器上没有覆盖到 live 链路。');
   } else {
   try {

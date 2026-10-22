@@ -12,23 +12,13 @@
   "role": {
     "maxInjectChars": 6000
   },
-  "snowluma": {
-    "wsUrl": "ws://127.0.0.1:3001",
-    "httpUrl": "http://127.0.0.1:3000",
-    "accessToken": "",
-    "followDiscoveredEndpoint": true,
-    "silenceWarnMs": 600000,
-    "launcherPath": "",
-    "homeDir": ""
-  },
-  "platform": "qq",
   "discord": {
     "token": "",
     "guildMembersIntent": false
   },
-  "ownerQQ": null,
+  "ownerId": null,
   "sessionCwd": "",
-  "agentPreset": "qq-chat",
+  "agentPreset": "dc-chat",
   "workspaceTitle": "聊天",
   "allow": {
     "private": [],
@@ -69,7 +59,7 @@
       8
     ],
     "injectMax": 8,
-    "learnerPreset": "qq-chat",
+    "learnerPreset": "dc-chat",
     "workspaceTitle": "黑话学习",
     "autoResearch": true
   },
@@ -113,7 +103,7 @@
   "socialV2": {
     "enabled": true,
     "autoReplyCheckMs": 30000,
-    "agentPreset": "qq-chat-v2",
+    "agentPreset": "dc-chat-v2",
     "provideRecommendations": true,
     "tools": {
       "getPrompt": true,
@@ -136,14 +126,6 @@
       "slangQuery": true,
       "slangSubmit": true,
       "getImages": true,
-      "getForwardMsg": true,
-      "sendPoke": true,
-      "listStickers": true,
-      "getStickerImage": true,
-      "sendSticker": true,
-      "setStickerRemark": false,
-      "stickerNote": true,
-      "collectSticker": true,
       "getSelfImage": true,
       "sendVoice": false
     },
@@ -180,7 +162,6 @@
       "recommendedAtMention": true,
       "recommendedNameMention": true,
       "recommendedQuestion": true,
-      "recommendedPoke": true,
       "recommendedHint": "如果你要潜水，推荐先调用 chat_wait_for_messages(timeoutMs=300000) 完成一次沉睡前观察：5 分钟内没人说话就可以设置下一次唤醒并沉睡；若期间有人发新消息，先查看 newMessages，判断不需要你参与可直接沉睡，若参与了则下次想睡需再等观察窗口。潜水时长推荐 5~120 分钟，普通消息概率 0.05；@/名字/关键词/提问唤醒建议保持开启。需要等特定某人/某几人时，可额外设置 triggers.speakerIds。",
       "batchWindowMs": 8000,
       "maxWakePerMinute": 1,
@@ -210,19 +191,6 @@
       "maxMs": 600000,
       "defaultQuietMs": 8000,
       "minQuietAfterNewMs": 10000
-    },
-    "sticker": {
-      "enabled": true,
-      "syncTtlMs": 60000,
-      "maxListCount": 100,
-      "includeInPrompt": true,
-      "promptMaxStickers": 8,
-      "collect": {
-        "enabled": true,
-        "maxPerMinute": 2,
-        "maxPerHour": 10,
-        "maxRemarkChars": 20
-      }
     },
     "voice": {
       "enabled": false,

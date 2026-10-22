@@ -2,16 +2,15 @@
 //
 // 背景（会话实证，docs/audits/AUDIT_2026-10-18_MEDIA_AND_WATERMARK.md §3 P3）：
 //   一份 reserved2 会话的请求头是「58 个工具 / 45.5 KB schema（≈14k token/次）」，其中
-//     · chat_list_groups / chat_get_group_members / chat_get_group_history：旧无令牌工具，
-//       在 reserved2 下**必然** 403，白占 schema 还诱导模型误调（实测 turn10 踩过）；
-//     · 而 qq-chat-v2 预设第 6 条又明确叫模型去用 chat_get_group_members 拿 QQ 号。
+//     · 旧的无令牌只读工具在 reserved2 下**必然** 403，白占 schema 还诱导模型误调（实测 turn10 踩过）；
+//     · 而 dc-chat-v2 预设第 6 条又明确叫模型去用 chat_get_group_members 拿用户 id。
 //
 // 本文件验证：
 //   1. chat_get_group_members 已是 v2 形态（key + token），走桥接的 /api/socialV2/group-members；
 //   2. 该端点只认 group: 会话、要令牌、不在白名单就拒（与其它 v2 读工具同一套闸门）；
-//   3. 旧只读工具按**启动模式**注册（源代码级断言：DSH 侧注册需要真跑 MCP 子进程，
-//      本机沙箱里 spawn EPERM，因此这里退化为结构断言 + 下面的令牌级行为断言）；
-//   4. WS 不可用时群成员查询走 HTTP 兜底。
+//   3. 旧的无令牌只读工具已不再注册（源代码级断言：DSH 侧注册需要真跑 MCP 子进程，
+//      本机沙箱里 spawn EPERM，因此这里退化为结构断言 + 上面的令牌级行为断言）；
+//   4. 平台查询失败时返回可读的错误，而不是把异常吞掉。
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -29,8 +28,8 @@ async function test(name, run) {
   catch (error) { failures++; console.error('FAIL', name, '—', error?.stack ?? error); }
 }
 
-async function withBridge(run, config = {}, globals = {}) {
-  const h = await bridgeHarness({ config: { socialV2: { sticker: { enabled: false }, proactive: { enabled: false }, ...config } }, globals });
+async function withBridge(run, config = {}, globals = {}, platform = {}) {
+  const h = await bridgeHarness({ config: { socialV2: { proactive: { enabled: false }, ...config } }, globals, platform });
   h.setMode('reserved2');
   const st = h.getSocialV2State(KEY);
   const server = h.startConsoleServer();
@@ -102,7 +101,7 @@ await test('group-members 不在白名单的群被拒（不会变成任意群枚
 });
 
 await test('closed-agent（管理员私聊，无令牌）仍能查白名单群成员，但查不到别的群', async () => {
-  const h = await bridgeHarness({ config: { socialV2: { sticker: { enabled: false }, proactive: { enabled: false } } } });
+  const h = await bridgeHarness({ config: { socialV2: { proactive: { enabled: false } } } });
   h.setMode('closed-agent');
   const st = h.getSocialV2State(KEY);
   const server = h.startConsoleServer();
@@ -145,54 +144,30 @@ await test('工具开关能关掉 group-members（getGroupMembers=false）', asy
   }, { tools: { getGroupMembers: false } });
 });
 
-// ── 2. WS 不可用时走 HTTP 兜底 ─────────────────────────────────────────────
-class WsDownBot {
-  onPrivateMessage() {} onGroupMessage() {} onNotice() {} onEvent() {} onEventError() {}
-  async request() { throw new Error('SnowLuma WebSocket closed before opening'); }
-  async getImage() { return null; }
-  async fetchFaceEntity() { return null; }
-  async connect() {} close() {}
-}
-
-await test('WS 挂了，群成员查询仍然可用（HTTP 兜底）', async () => {
-  // 这个 fakeFetch 同时服务两条路：WS 抛错后 onebotHttpAction 会打 HTTP 拿成员数组。
-  const fetchStub = async (url) => {
-    if (String(url).endsWith('/get_group_member_list')) {
-      return { ok: true, status: 200, json: async () => ({ status: 'ok', retcode: 0, data: [{ user_id: 999, nickname: 'HTTP 成员', card: '' }] }) };
-    }
-    return { ok: true, status: 200, json: async () => ({ status: 'ok', retcode: 0, data: {} }) };
-  };
+// ── 2. 平台查询失败 ─────────────────────────────────────────────────────────
+await test('平台查询成员失败时回 500 与可读原因', async () => {
   await withBridge(async ({ request }) => {
     const out = await request('group-members');
-    assert.equal(out.status, 200, JSON.stringify(out.data));
-    assert.deepEqual(out.data.members.map((m) => m.nickname), ['HTTP 成员']);
-  }, {}, { SnowLumaWebSocketClient: WsDownBot, fetch: fetchStub });
+    assert.equal(out.status, 500, JSON.stringify(out.data));
+    assert.equal(out.data.ok, false);
+    assert.match(out.data.error, /Missing Access/);
+  }, {}, {}, { getGroupMemberList: async () => { throw new Error('Missing Access'); } });
 });
 
-// ── 3. 源码级断言：注册期按模式收敛 ────────────────────────────────────────
-await test('旧只读工具按启动模式注册，v2 群成员工具不依赖 closed-agent', async () => {
-  const src = fs.readFileSync(path.join(ROOT, 'src/mcp-snowluma-safe.js'), 'utf8');
-  assert.match(src, /registerLegacyReadTools/, '必须有按模式决定的注册开关');
-  assert.match(src, /mode === '' \|\| bootBridgeMode === 'closed-agent'|bootBridgeMode === '' \|\| bootBridgeMode === 'closed-agent'/,
-    '只在 closed-agent（或探测失败）时注册旧只读工具');
-  // chat_list_groups / chat_get_group_history 必须包在开关里
+// ── 3. 源码级断言：只剩 v2 形态的成员工具 ──────────────────────────────────
+await test('旧无令牌只读工具不再注册，chat_get_group_members 是 v2 形态', async () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/mcp-discord-safe.js'), 'utf8');
   for (const name of ['chat_list_groups', 'chat_get_group_history']) {
-    const at = src.indexOf(`'${name}'`);
-    assert.ok(at > 0, `${name} 应当仍存在（closed-agent 下要能用）`);
-    const guarded = src.lastIndexOf('if (registerLegacyReadTools) {', at);
-    assert.ok(guarded > 0, `${name} 必须被 if (registerLegacyReadTools) 包住`);
-    const between = src.slice(guarded, at);
-    assert.ok(!between.includes('}\n\n//'), `${name} 与开关之间不能夹着别的注册块`);
+    assert.ok(!src.includes(`'${name}'`), `${name} 不应再注册`);
   }
-  // chat_get_group_members 必须是 v2 形态（带 key+token），且不在开关里
-  const membersAt = src.indexOf("'chat_get_group_members'");
+  assert.doesNotMatch(src, /registerLegacyReadTools/);
+  // chat_get_group_members 必须是 v2 形态（带 key+token）
+  const membersAt = src.indexOf("'chat_get_group_members'", src.indexOf('server.tool('));
   assert.ok(membersAt > 0);
   const membersBlock = src.slice(membersAt, membersAt + 900);
   assert.match(membersBlock, /key: z\.string\(\)/, 'v2 形态必须有 key');
   assert.match(membersBlock, /token: z\.string\(\)/, 'v2 形态必须有 token');
   assert.doesNotMatch(membersBlock, /groupId: z\./, '不应再接受裸 groupId');
-  assert.ok(src.lastIndexOf('if (registerLegacyReadTools) {', membersAt) < src.indexOf("'chat_list_groups'"),
-    'chat_get_group_members 不能落在旧只读工具的注册开关里');
   // 工具开关登记（否则控制台关不掉它）
   assert.match(src, /chat_get_group_members: 'getGroupMembers'/, '工具开关要登记 getGroupMembers');
 });

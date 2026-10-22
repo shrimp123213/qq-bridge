@@ -402,7 +402,7 @@
 
       <div class="row" style="margin-top:10px">
         <label style="flex:1">启用二代模式</label><input type="checkbox" id="v2Enabled" style="width:auto">
-        <label style="flex:1">agentPreset</label><input type="text" id="v2AgentPreset" placeholder="qq-chat-v2" style="max-width:200px">
+        <label style="flex:1">agentPreset</label><input type="text" id="v2AgentPreset" placeholder="dc-chat-v2" style="max-width:200px">
       </div>
       <div class="row" style="margin-top:6px">
         <label style="flex:1">提供推荐值给 AI</label><input type="checkbox" id="v2ProvideRecommendations" style="width:auto">
@@ -761,7 +761,7 @@
           <label style="flex:1">注入最大条数</label><input type="number" id="slangInjectMax" min="1" max="30" style="width:90px">
         </div>
         <div class="row">
-          <label style="flex:1">学习会话 preset</label><input type="text" id="slangLearnerPreset" placeholder="qq-chat" style="width:120px">
+          <label style="flex:1">学习会话 preset</label><input type="text" id="slangLearnerPreset" placeholder="dc-chat" style="width:120px">
         </div>
         <div class="row">
           <label style="flex:1">学习工作区名</label><input type="text" id="slangWorkspaceTitle" placeholder="QQ 黑话学习" style="width:120px">
@@ -825,8 +825,8 @@
       <input type="text" id="wlGroups" placeholder="123456789, 123456">
       <label>允许的私聊 QQ（逗号分隔）</label>
       <input type="text" id="wlPrivate" placeholder="123456789">
-      <label>管理员 QQ（ownerQQ，最高权限）</label>
-      <input type="text" id="ownerQQ" placeholder="123456789">
+      <label>管理员 QQ（ownerId，最高权限）</label>
+      <input type="text" id="ownerId" placeholder="123456789">
       <div class="meta">管理员是唯一可执行管理命令/审批/closed-agent 的 QQ；可留空清除（清除后无管理员，fail-closed）。</div>
       <label>拒绝的群号（黑名单，逗号分隔）</label>
       <input type="text" id="dnGroups" placeholder="">
@@ -965,7 +965,7 @@ async function refresh() {
     document.getElementById('roleText').textContent = s.role || '无';
     document.getElementById('roleModeText').textContent = s.roleMode === 'silent' ? '静默' : '正常';
     const modeLabel = s.mode === 'reserved' ? '一代仿真模式' : s.mode === 'reserved2' ? '二代仿真模式' : s.mode === 'closed-agent' ? '封闭 Agent' : '聊天模式';
-    document.getElementById('statusText').textContent = 'DSH: ' + (s.dshReady ? '在线' : '离线') + ' ｜ 模式: ' + modeLabel + ' ｜ 管理员: ' + (s.ownerQQ || '未设置') + ' ｜ 群白名单: ' + (s.allowGroups.join(', ') || '无') + ' ｜ 私聊白名单: ' + (s.allowPrivate.join(', ') || '无');
+    document.getElementById('statusText').textContent = 'DSH: ' + (s.dshReady ? '在线' : '离线') + ' ｜ 模式: ' + modeLabel + ' ｜ 管理员: ' + (s.ownerId || '未设置') + ' ｜ 群白名单: ' + (s.allowGroups.join(', ') || '无') + ' ｜ 私聊白名单: ' + (s.allowPrivate.join(', ') || '无');
     document.getElementById('activity').textContent = s.activity || '（空）';
     const presetSel = document.getElementById('closedPreset');
     if (presetSel && document.activeElement !== presetSel) presetSel.value = s.closedAgentPreset || '';
@@ -1030,7 +1030,7 @@ async function refreshWhitelist() {
     const w = await api('/api/whitelist');
     document.getElementById('wlGroups').value = (w.allow.groups || []).join(', ');
     document.getElementById('wlPrivate').value = (w.allow.private || []).join(', ');
-    document.getElementById('ownerQQ').value = w.ownerQQ != null ? String(w.ownerQQ) : '';
+    document.getElementById('ownerId').value = w.ownerId != null ? String(w.ownerId) : '';
     document.getElementById('dnGroups').value = (w.deny.groups || []).join(', ');
     document.getElementById('dnPrivate').value = (w.deny.private || []).join(', ');
   } catch {}
@@ -1105,7 +1105,7 @@ document.getElementById('wlSave').addEventListener('click', async () => {
   const r = await api('/api/whitelist', 'POST', {
     allow: { private: parse(document.getElementById('wlPrivate').value), groups: parse(document.getElementById('wlGroups').value) },
     deny: { private: parse(document.getElementById('dnPrivate').value), groups: parse(document.getElementById('dnGroups').value) },
-    ownerQQ: document.getElementById('ownerQQ').value.trim()
+    ownerId: document.getElementById('ownerId').value.trim()
   });
   if (r.ok) { refreshWhitelist(); refresh(); alert('白名单已保存并生效'); }
   else alert(r.error || '保存失败');
@@ -2129,7 +2129,7 @@ function loadSlangConfig() {
     document.getElementById('slangCooldown').value = c.extractCooldownMs ?? 300000;
     document.getElementById('slangThresholds').value = (c.inferenceThresholds || [2, 4, 8]).join(', ');
     document.getElementById('slangInjectMax').value = c.injectMax ?? 8;
-    document.getElementById('slangLearnerPreset').value = c.learnerPreset || 'qq-chat';
+    document.getElementById('slangLearnerPreset').value = c.learnerPreset || 'dc-chat';
     document.getElementById('slangWorkspaceTitle').value = c.workspaceTitle || 'QQ 黑话学习';
     document.getElementById('slangAutoResearch').checked = c.autoResearch !== false;
   }).catch(() => {});

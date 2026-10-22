@@ -30,9 +30,9 @@
 | 机制 | 位置 | 行为 |
 | --- | --- | --- |
 | 白名单 | `src/bridge.js` `allowed()` | `deny` 优先于 `allow`；两侧统一 `String()` 比较（兼容 OneBot int64 的数字/字符串差异）；allow 为空时返回 `allowAllWhenEmpty`（**默认 false**） |
-| 模式门 | `modeAllowed()` / `isSessionAllowedInCurrentMode()` | 会话 key 必须严格匹配 `^(group\|private):\d+$`；`closed-agent` 只放行 `private:<ownerQQ>` |
+| 模式门 | `modeAllowed()` / `isSessionAllowedInCurrentMode()` | 会话 key 必须严格匹配 `^(group\|private):\d+$`；`closed-agent` 只放行 `private:<ownerId>` |
 | 配置失败 | `loadConfig()` | `config.json` 缺失/解析失败 → **fail-fast 退出**（不是"用默认值继续跑"） |
-| 管理员识别 | `handleIncoming()` | `String(event.user_id) === String(cfg.ownerQQ ?? '')`；未配置 `ownerQQ` 时启动日志明确告警（审批/管理命令/封闭 agent 全部不可用） |
+| 管理员识别 | `handleIncoming()` | `String(event.user_id) === String(cfg.ownerId ?? '')`；未配置 `ownerId` 时启动日志明确告警（审批/管理命令/封闭 agent 全部不可用） |
 
 ### 2. 工具面（agent 能做什么）
 
@@ -159,7 +159,7 @@ node --check src/bridge.js  # 语法门禁（大文件改动后必跑）
 安全专项必须覆盖（缺一不可）：
 
 - [x] 白名单/黑名单/空白名单 fail-closed（含单复数与字符串/数字两种写法）
-- [x] `closed-agent` 只对 `private:<ownerQQ>` 放行；模式切换会退役旧会话
+- [x] `closed-agent` 只对 `private:<ownerId>` 放行；模式切换会退役旧会话
 - [x] 预设清单不可用时**拒绝**建群聊会话（不回退到默认预设）
 - [x] agent token 无法访问任何管理端点；空 agent token 被拒
 - [x] 控制台伪造 `Host` 被拒；错令牌（含错长度、大小写、尾空格）被拒

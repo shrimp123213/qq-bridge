@@ -36,7 +36,7 @@
     "path": "/api/mode",
     "body": {
       "mode": "closed-agent",
-      "closedAgentPreset": "qq-chat-v2"
+      "closedAgentPreset": "dc-chat-v2"
     }
   },
   {
@@ -98,7 +98,7 @@
           "800002"
         ]
       },
-      "ownerQQ": "100001"
+      "ownerId": "100001"
     }
   },
   {
@@ -445,7 +445,7 @@
         12
       ],
       "injectMax": 8,
-      "learnerPreset": "qq-chat",
+      "learnerPreset": "dc-chat",
       "workspaceTitle": "QQ 黑话学习",
       "autoResearch": true
     }

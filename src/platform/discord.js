@@ -1,31 +1,38 @@
-// Discord 平台适配层（discord.js v14，bot 账号）。
+// Discord 平台适配层（discord.js v14，bot 账号）。bridge.js 的所有收发都经过这里。
 //
-// 接口与 QQ 适配层（./qq-onebot.js 顶部的说明）一致，bridge.js 不需要知道对面是哪个平台。
-// 这里只记 Discord 自己的映射规则：
+// 对 bridge.js 提供的接口：
+//   start / onMessage / onReady / healthSnapshot
+//   sendText(kind, id, text) / sendMessage(kind, id, { replyTo, mentionUserId, text, image }) / sendVoice(kind, id, file)
+//     → 都返回 { messageId }（多条连发时是第一条的 id）
+//   getSelfInfo() → { userId, nickname }
+//   getMessage(messageId, { kind, conversationId }) → InboundMessage | null
+//   getGroupMemberList(channelId) / getGroupMemberInfo(channelId, userId) → { userId, nickname, card, role }
+//   confirmVoiceSent(messageId) → { confirmed, duration } | null
 //
+// InboundMessage = { kind, conversationId, messageId, messageSeq: null, sender: { userId, nickname, card }, selfId, segments }
+//
+// 映射规则：
 //   会话：服务器里的文字频道（含讨论串）→ kind='group'，conversationId = 频道 id；
-//         私信 → kind='private'，conversationId = 对方的用户 id（与 QQ 私聊用 QQ 号一致）。
-//         所以 config.json 的 allow.groups 填频道 id，allow.private / ownerQQ 填用户 id。
-//   发送者：nickname = 全局显示名（没有就用用户名），card = 服务器昵称（相当于 QQ 群名片）。
-//   消息内容 → OneBot 消息段：
-//     <@id> / <@!id>        → at{qq:id}
-//     <@&机器人身份组>       → at{qq:机器人 id}（在 Discord 里点「@机器人」常常选到的是它的身份组）
+//         私信 → kind='private'，conversationId = 对方的用户 id。
+//         所以 config.json 的 allow.groups 填频道 id，allow.private / ownerId 填用户 id。
+//   发送者：nickname = 全局显示名（没有就用用户名），card = 服务器昵称。
+//   消息内容 → 消息段：
+//     <@id> / <@!id>        → at{id}
+//     <@&机器人身份组>       → at{id:机器人 id}（在 Discord 里点「@机器人」常常选到的是它的身份组）
 //     <@&其它身份组>         → 文字「@身份组名」
 //     <#频道>               → 文字「#频道名」
-//     @everyone / @here     → 真的提及了全体才是 at{qq:'all'}，否则保留原文
-//     <:名字:id> 自定义表情 → mface{summary, url}
-//     贴纸                  → mface{summary, url}（Lottie 动画贴纸没有位图，只留文字）
-//     附件                  → image / record（含语音消息）/ video / file{name}
+//     @everyone / @here     → 真的提及了全体才是 at{id:'all'}，否则保留原文
+//     <:名字:id> 自定义表情 → sticker{summary, url}
+//     贴纸                  → sticker{summary, url}（Lottie 动画贴纸没有位图，只留文字）
+//     附件                  → image / audio（含语音消息）/ video / file{name}
 //     回复                  → reply{id}（只认同一频道内的回复）
 //     转发（message snapshot）→ 文字「[转发] 」加上被转发消息的内容
 //   入站过滤：其它 bot 与 webhook 发的消息直接丢弃（不进未读、不唤醒）。
 //   出站：
 //     · 只有 sendMessage 的 mentionUserId 会真的提醒到人；文本里的 @everyone、身份组、
-//       其它 <@id> 一律不提醒（allowedMentions），对应 QQ 那边「禁止 @全体」的约束。
+//       其它 <@id> 一律不提醒（allowedMentions）。
 //     · 单条超过 2000 字（Discord 上限）时按换行/空格切成几条连发，引用只挂在第一条上。
 //     · 语音以音频附件发出（不是 Discord 的「语音消息」格式，那需要 OGG/Opus 与波形数据）。
-//   做不到的（能力表见 ./capabilities.js，对应的 MCP 工具不会注册）：
-//     拍一拍、QQ 式合并转发、收藏表情库、语音转文字。
 //
 // Developer Portal 里必须打开 Message Content Intent；discord.guildMembersIntent=true 时
 // 还要打开 Server Members Intent（用来拉完整的成员列表；不开就只认得发过言的人）。
@@ -84,17 +91,17 @@ function contentToSegments(content, mentions, ctx) {
     pushText(source.slice(cursor, m.index));
     cursor = m.index + m[0].length;
     if (m[1]) {
-      segments.push({ type: 'at', data: { qq: m[1] } });
+      segments.push({ type: 'at', data: { id: m[1] } });
     } else if (m[2]) {
-      if (ctx.selfId && ctx.selfRoleIds.includes(m[2])) segments.push({ type: 'at', data: { qq: ctx.selfId } });
+      if (ctx.selfId && ctx.selfRoleIds.includes(m[2])) segments.push({ type: 'at', data: { id: ctx.selfId } });
       else pushText(`@${lookupName(mentions?.roles, m[2]) || '身份组'}`);
     } else if (m[3]) {
       pushText(`#${lookupName(mentions?.channels, m[3]) || '频道'}`);
     } else if (m[6]) {
-      segments.push({ type: 'mface', data: { summary: m[5], url: `https://cdn.discordapp.com/emojis/${m[6]}.${m[4] ? 'gif' : 'png'}` } });
+      segments.push({ type: 'sticker', data: { summary: m[5], url: `https://cdn.discordapp.com/emojis/${m[6]}.${m[4] ? 'gif' : 'png'}` } });
     } else if (m[7]) {
       // 没有权限的人打出来的 @everyone 只是普通文字，不算提及全体
-      if (mentions?.everyone === true) segments.push({ type: 'at', data: { qq: 'all' } });
+      if (mentions?.everyone === true) segments.push({ type: 'at', data: { id: 'all' } });
       else pushText(m[0]);
     }
   }
@@ -106,7 +113,7 @@ function attachmentToSegment(attachment, isVoiceMessage) {
   const contentType = String(attachment?.contentType ?? '').toLowerCase();
   const name = String(attachment?.name ?? '');
   const url = String(attachment?.url ?? '');
-  if (isVoiceMessage || contentType.startsWith('audio/')) return { type: 'record', data: { file: name, url } };
+  if (isVoiceMessage || contentType.startsWith('audio/')) return { type: 'audio', data: { file: name, url } };
   if (contentType.startsWith('image/') || (!contentType && IMAGE_EXT_RE.test(name))) {
     return { type: 'image', data: { file: name, url, summary: '' } };
   }
@@ -122,7 +129,7 @@ function bodySegments(message, ctx) {
     if (sticker?.format === StickerFormatType.Lottie || !sticker?.url) {
       segments.push({ type: 'text', data: { text: `[贴纸${name ? `:${name}` : ''}]` } });
     } else {
-      segments.push({ type: 'mface', data: { summary: name, url: String(sticker.url) } });
+      segments.push({ type: 'sticker', data: { summary: name, url: String(sticker.url) } });
     }
   }
   const isVoiceMessage = message?.flags?.has?.(MessageFlags.IsVoiceMessage) === true;
@@ -199,10 +206,6 @@ function imageFileName(buffer) {
   return 'image.png';
 }
 
-function unsupported(what) {
-  return new Error(`Discord 不支持${what}`);
-}
-
 /**
  * @param {object} options
  * @param {object} options.cfg - 桥接的运行配置（读 cfg.discord.token / guildMembersIntent）
@@ -246,18 +249,11 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
   }
   function healthSnapshot() {
     return {
-      platform: 'discord',
       connected: health.connected,
-      accountOnline: health.connected,
-      good: null,
-      goodSource: null,
-      goodError: health.lastError || null,
-      lastPacketAgoMs: health.lastEventAt ? Date.now() - health.lastEventAt : null,
-      lastPacketKind: health.lastEventKind || null,
+      lastEventAgoMs: health.lastEventAt ? Date.now() - health.lastEventAt : null,
+      lastEventKind: health.lastEventKind || null,
       pingMs: Number.isFinite(client.ws?.ping) && client.ws.ping >= 0 ? client.ws.ping : null,
-      silent: false,
-      degraded: false,
-      hint: null
+      lastError: health.lastError || null
     };
   }
 
@@ -281,7 +277,7 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
   }
 
   // ── 发送 ───────────────────────────────────────────────────────────────────
-  // 返回 { message_id }（第一条的 id），与 OneBot 发送接口的 data 同形。
+  // 返回 { messageId }（第一条的 id）。
   async function sendPayloads(kind, id, { content = '', replyTo = null, mentionUserId = null, files = null } = {}) {
     const channel = await resolveChannel(kind, id);
     const mention = mentionUserId !== null && mentionUserId !== undefined ? String(mentionUserId) : null;
@@ -303,14 +299,14 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
       rememberMessage(sent?.id, sent?.channelId ?? channel.id);
       if (firstId === null) firstId = idOrNull(sent?.id);
     }
-    return { message_id: firstId };
+    return { messageId: firstId };
   }
 
   function sendText(kind, id, content) {
     return sendPayloads(kind, id, { content });
   }
 
-  // replyTo / mentionUserId 由调用方校验过格式；image 与 text 二选一，image 优先（与 QQ 一致）。
+  // replyTo / mentionUserId 由调用方校验过格式；image 与 text 二选一，image 优先。
   function sendMessage(kind, id, { replyTo = null, mentionUserId = null, text: content = '', image = null } = {}) {
     if (image) {
       return sendPayloads(kind, id, { replyTo, mentionUserId, files: [{ attachment: image, name: imageFileName(image) }] });
@@ -320,10 +316,6 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
 
   function sendVoice(kind, id, file) {
     return sendPayloads(kind, id, { files: [{ attachment: String(file), name: path.basename(String(file)) }] });
-  }
-
-  async function poke() {
-    throw unsupported('拍一拍');
   }
 
   // ── 查询 ───────────────────────────────────────────────────────────────────
@@ -366,30 +358,15 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
     }
   }
 
-  // Discord 的图片段都带 url，桥接直接按 url 下载，这里不需要网关缓存。
-  async function getImage() {
-    return null;
-  }
-
-  // Discord 没有 QQ 的系统小表情（face 段）
-  async function getFace() {
-    return null;
-  }
-
-  async function getForwardMessage() {
-    throw unsupported('QQ 式合并转发');
-  }
-
   function memberRole(guild, member) {
     if (guild?.ownerId && String(guild.ownerId) === String(member.id)) return 'owner';
     if (member.permissions?.has?.(PermissionFlagsBits.Administrator)) return 'admin';
     return 'member';
   }
 
-  // OneBot 成员信息的形状（user_id / nickname / card / role），bridge.js 按这个读。
   function toMemberInfo(guild, member) {
     return {
-      user_id: String(member.id),
+      userId: String(member.id),
       nickname: String(member.user?.globalName || member.user?.username || ''),
       card: String(member.nickname ?? ''),
       role: memberRole(guild, member)
@@ -411,7 +388,7 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
     }
   }
 
-  // 「群成员」= 能看到这个频道的服务器成员
+  // 频道成员 = 能看到这个频道的服务器成员
   async function getGroupMemberList(channelId) {
     const channel = await guildChannel(channelId);
     const guild = channel.guild;
@@ -427,10 +404,6 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
     return member ? toMemberInfo(channel.guild, member) : null;
   }
 
-  async function getGroupMemberListWithFallback(channelId) {
-    return { status: 'ok', retcode: 0, data: await getGroupMemberList(channelId) };
-  }
-
   // 语音是以音频附件发的：读回这条消息、确认附件还在，就算落地。
   async function confirmVoiceSent(messageId) {
     const message = await fetchMessage(messageId).catch(() => null);
@@ -439,25 +412,8 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
     return { confirmed: true, duration: Number.isFinite(attachment.duration) ? attachment.duration : null };
   }
 
-  async function voiceToText() {
-    return null;
-  }
-
-  async function fetchStickerLibrary() {
-    throw unsupported('收藏表情库');
-  }
-
-  async function addSticker() {
-    throw unsupported('收藏表情库');
-  }
-
-  async function setStickerRemark() {
-    throw unsupported('收藏表情库');
-  }
-
   // ── 连接与事件 ─────────────────────────────────────────────────────────────
   function onMessage(handler) { messageHandler = handler; }
-  function onPoke() {} // Discord 没有拍一拍，永不触发
   function onReady(handler) { readyHandler = handler; }
 
   // token 无效、intent 没开这两种情况重试也没用，直接说清楚怎么修。
@@ -545,25 +501,15 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
     client,
     start,
     onMessage,
-    onPoke,
     onReady,
     healthSnapshot,
     sendText,
     sendMessage,
     sendVoice,
-    poke,
     getSelfInfo,
     getMessage,
-    getImage,
-    getFace,
-    getForwardMessage,
     getGroupMemberList,
     getGroupMemberInfo,
-    getGroupMemberListWithFallback,
-    confirmVoiceSent,
-    voiceToText,
-    fetchStickerLibrary,
-    addSticker,
-    setStickerRemark
+    confirmVoiceSent
   };
 }

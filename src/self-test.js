@@ -1,4 +1,4 @@
-// 自测脚本：不依赖 SnowLuma / QQ，只验证 DSH 侧链路——
+// 自测脚本：不依赖 Discord，只验证 DSH 侧链路——
 //   1. 连接 DSH Web API
 //   2. 创建一个独立测试会话（不会碰现有会话）
 //   3. 通过 events.mux 订阅事件流
@@ -57,7 +57,7 @@ async function main() {
   // state/ 被 scripts/harden-state-acl.mjs 收紧了 ACL（去掉继承 ACE，只留当前用户 /
   // SYSTEM / Administrators），DSH 沙箱的能力 SID 不在 ACL 里 ⇒ 在沙箱内跑自检
   // 会直接 EPERM 建目录。自检是一次性探针，产物本来也不该落进仓库状态目录。
-  const cwd = path.join(os.tmpdir(), 'qq-bridge-self-test');
+  const cwd = path.join(os.tmpdir(), 'discord-bridge-self-test');
   fs.mkdirSync(cwd, { recursive: true });
   const created = unwrap(await api.sessions.create({ cwd }), 'session.create');
   const sessionId = created.sessionId;

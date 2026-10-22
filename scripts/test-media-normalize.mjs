@@ -43,8 +43,8 @@ const GIF_FRAME = '21f9040100000000' + '2c0000000001000100000202440100'; // GCE 
 const GIF_1 = Buffer.from(GIF_HEAD + GIF_FRAME + '3b', 'hex');
 const GIF_2 = Buffer.from(GIF_HEAD + GIF_FRAME + GIF_FRAME + '3b', 'hex');
 const PNG_1x1 = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6300010000050001', 'hex');
-// 审计 harness 的 FakeBot.getImage 固定回这一张 1×1 PNG（用于断言「原始字节没被重编码」）。
-const FAKE_GATEWAY_PNG = Buffer.from(
+// 桥接集成测试里 safeFetchBuffer 桩固定回这一张 1×1 PNG。
+const FAKE_CDN_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k3ioAAAAASUVORK5CYII=',
   'base64'
 );
@@ -157,7 +157,7 @@ await test('normalizeImageForModel：压不动的垃圾字节 ⇒ ok:false 且�
 });
 
 // ── 4. 真实 ffmpeg：抽帧拼图 / 降采样（没装 ffmpeg 就跳过） ─────────────────
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-media-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-media-test-'));
 const ff = (args) => spawnSync('ffmpeg', ['-v', 'error', '-y', ...args], { stdio: 'ignore' });
 
 await test('真实动图 → 抽帧拼图（单张 JPEG + 帧数说明）', async () => {
@@ -211,35 +211,46 @@ await test('抽帧失败（ffmpeg 超时/不可用）也不崩：退回首帧 + 
   assert.match(out.note, /只提供首帧/);
 });
 
-// ── 5. 桥接集成：出图出口会归一化，收藏表情仍拿原始字节 ────────────────────
+// ── 5. 桥接集成：出图出口会归一化；取图只走附件/CDN 的 http(s) 地址 ─────────
+const IMAGE_URL = 'https://cdn.discordapp.com/attachments/1/2/fixture.png';
+const cdnStub = (seen = []) => ({
+  safeFetchBuffer: async (url) => { seen.push(String(url)); return { url: String(url), statusCode: 200, buffer: FAKE_CDN_PNG }; }
+});
+
 await test('桥接 fetchMediaData 走归一化，且拿得到 mimeType/data', async () => {
-  const h = await bridgeHarness();
+  const seen = [];
+  const h = await bridgeHarness({ globals: cdnStub(seen) });
   try {
-    const out = await h.fetchMediaData([{ kind: 'image', file: 'fixture.png' }]);
+    const out = await h.fetchMediaData([{ kind: 'image', file: 'fixture.png', url: IMAGE_URL }]);
     assert.equal(out.length, 1);
     assert.equal(out[0].mimeType, 'image/png');
     assert.ok(out[0].data && out[0].data.length > 0);
+    assert.deepEqual(seen, [IMAGE_URL]);
   } finally { await h.close(); }
 });
 
 await test('桥接 resolveMediaList（一代内联）同样出图', async () => {
-  const h = await bridgeHarness();
+  const h = await bridgeHarness({ globals: cdnStub() });
   try {
-    const parts = await h.resolveMediaList([{ kind: 'image', file: 'fixture.png' }]);
+    const parts = await h.resolveMediaList([{ kind: 'image', file: 'fixture.png', url: IMAGE_URL }]);
     const image = parts.find((p) => p.type === 'image');
     assert.ok(image, '应当产出一个 image part');
     assert.equal(image.mediaType, 'image/png');
   } finally { await h.close(); }
 });
 
-await test('fetchOneBotImage 仍返回**原始字节**（收藏表情不能被降采样/拼图）', async () => {
-  const h = await bridgeHarness();
+await test('fetchImageMedia 返回**原始字节**，没有 http(s) 地址时不抓', async () => {
+  const seen = [];
+  const h = await bridgeHarness({ globals: cdnStub(seen) });
   try {
-    const raw = await h.fetchOneBotImage({ kind: 'image', file: 'fixture.png' });
+    const raw = await h.fetchImageMedia({ kind: 'image', file: 'fixture.png', url: IMAGE_URL });
     assert.ok(raw?.buffer);
-    // FakeBot.getImage 回的 1×1 PNG 原样返回：字节完全一致即证明没经过归一化重编码
-    assert.equal(raw.buffer.length, FAKE_GATEWAY_PNG.length);
-    assert.deepEqual(raw.buffer, FAKE_GATEWAY_PNG);
+    // 桩回的 1×1 PNG 原样返回：字节完全一致即证明没经过归一化重编码
+    assert.equal(raw.buffer.length, FAKE_CDN_PNG.length);
+    assert.deepEqual([...raw.buffer], [...FAKE_CDN_PNG]);
+    assert.equal(await h.fetchImageMedia({ kind: 'image', file: 'fixture.png', url: '' }), null);
+    assert.equal(await h.fetchImageMedia({ kind: 'image', file: 'x', url: 'file:///etc/passwd' }), null);
+    assert.deepEqual(seen, [IMAGE_URL], '没有 http(s) 地址的条目不得发起请求');
   } finally { await h.close(); }
 });
 

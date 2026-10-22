@@ -25,7 +25,7 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const { names, packages } = collectDshToolNames();
-const guardPath = path.join(ROOT, 'plugins', 'qq-agent-presets', 'qq-tool-restrict.mjs');
+const guardPath = path.join(ROOT, 'plugins', 'discord-agent-presets', 'discord-tool-restrict.mjs');
 const guard = await import(pathToFileURL(guardPath).href);
 const guarded = new Set(guard.RESTRICTED_TOOL_NAMES);
 // 0.2.1 起 Codex / Claude Code 改为按需安装的可选插件：这组名字默认扫不到，

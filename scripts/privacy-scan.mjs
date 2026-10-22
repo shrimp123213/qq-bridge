@@ -106,7 +106,7 @@ function listFiles() {
   const MAX_FILE_BYTES = 8 * 1024 * 1024;
   const walk = (dir, rel, depth) => {
     if (depth > MAX_DEPTH) return;
-    // 真实存在的坑：本仓库里 `state/setup-dsh-test-home/plugins/qq-mode-console` 是一个
+    // 真实存在的坑：本仓库里 `state/setup-dsh-test-home/plugins/discord-mode-console` 是一个
     // **junction**，指回仓库自身 ⇒ 朴素遍历会无限递归。所以必须显式跳过所有 reparse point
     // （junction / 符号链接）。Windows 上 Node 的 Dirent.isSymbolicLink() 对 junction 不可靠，
     // 因此这里直接看 lstat 的 ReparsePoint 属性，再用 realpath 去重兜底。
@@ -190,9 +190,9 @@ function globToRe(glob) {
 }
 
 const rules = loadRules();
-if (process.env.QQ_BRIDGE_PRIVACY_DEBUG) console.error('[privacy-scan:debug] rules loaded');
+if (process.env.BRIDGE_PRIVACY_DEBUG) console.error('[privacy-scan:debug] rules loaded');
 const listed = listFiles();
-if (process.env.QQ_BRIDGE_PRIVACY_DEBUG) console.error(`[privacy-scan:debug] listed ${listed.files.length} files via ${listed.via}`);
+if (process.env.BRIDGE_PRIVACY_DEBUG) console.error(`[privacy-scan:debug] listed ${listed.files.length} files via ${listed.via}`);
 const files = listed.files;
 if (!files.length) {
   console.error('[privacy-scan] 没有拿到任何文件（目录遍历失败或仓库为空）');

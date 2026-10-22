@@ -260,16 +260,17 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
   try {
     h.setMode('reserved2');
     h.setInitialPrompt('group:456', ENV_TEXT);
+    // 与 src/platform/discord.js 的 toInboundMessage 产物同形
     const event = {
-      self_id: 999,
-      user_id: 123,
-      group_id: 456,
-      message_id: 4242,
-      message: [{ type: 'text', data: { text: '大家好' } }],
-      raw_message: '大家好',
-      sender: { nickname: '测试群友', card: '测试群友' }
+      kind: 'group',
+      conversationId: '456',
+      messageId: '4242',
+      messageSeq: null,
+      sender: { userId: '123', nickname: '测试成员', card: '测试成员' },
+      selfId: '999',
+      segments: [{ type: 'text', data: { text: '大家好' } }]
     };
-    await h.handleIncoming(h.toInboundMessage(event, 'group'), h.cfg);
+    await h.handleIncoming(event, h.cfg);
     for (let i = 0; i < 100 && !h.calls.prompts.length; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(h.calls.prompts.length, 1, '首条消息应触发恰好一次 bootstrap 唤醒');
     const delivered = h.calls.prompts[0].content.map((c) => String(c?.text ?? '')).join('\n');
@@ -277,8 +278,8 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
     assert.ok(delivered.includes(ENV_TEXT), 'bootstrap prompt 必须带操作者预写的环境说明');
 
     // 第二条消息（非首次唤醒）不得再注入
-    const second = { ...event, message_id: 4243, message: [{ type: 'text', data: { text: '有没有人在' } }], raw_message: '有没有人在' };
-    await h.handleIncoming(h.toInboundMessage(second, 'group'), h.cfg);
+    const second = { ...event, messageId: '4243', segments: [{ type: 'text', data: { text: '有没有人在' } }] };
+    await h.handleIncoming(second, h.cfg);
     for (let i = 0; i < 100 && h.calls.prompts.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     if (h.calls.prompts.length >= 2) {
       const text2 = h.calls.prompts[1].content.map((c) => String(c?.text ?? '')).join('\n');

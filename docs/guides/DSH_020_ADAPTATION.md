@@ -445,7 +445,7 @@ v0.2.0 发布后，有人反馈「**QQ 注入失败**」。调查后修了三类
 
 ⇒ 任何照 README 克隆的人跑自检都会看到一堆红，**看起来像"这个项目装出来就是坏的"**。
 
-**修复**：新增 `scripts/voice-tool-locator.mjs` 统一解析位置（支持 `QQ_BRIDGE_VOICE_TOOL_DIR` 覆盖），
+**修复**：新增 `scripts/voice-tool-locator.mjs` 统一解析位置（支持 `BRIDGE_VOICE_TOOL_DIR` 覆盖），
 缺目录时**明确跳过**（`⏭ 跳过…（这是跳过，不是通过）`）而不是崩溃；`config.json` 相关断言改为
 只断言 `config.example.json` 的**出厂默认** —— 顺带修掉一个语义错误：原先它断言的是**用户当前状态**，
 于是用户按文档打开「AI 发语音」之后测试就会变红（测试不该因为用户用了功能而失败）。
@@ -570,7 +570,7 @@ Bing **RSS** 仅作兜底；5 分钟查询缓存；空结果显式 `note`。安�
 
 ### J.5 验证
 
-`npm run test:audit` **33/35**（仅 `test-audit-setup` / `test-qq-model-view` 的沙箱 `spawn EPERM`）；
+`npm run test:audit` **33/35**（仅 `test-audit-setup` / `test-model-view` 的沙箱 `spawn EPERM`）；
 新增/更新离线回归：`test-media-search`、`test-issue-regressions`、`test-audit-regressions`（R15/R16）、
 `test-audit-security-mcp`（长轮询 + 对象 error）；`privacy-scan` 未发现敏感信息。
 

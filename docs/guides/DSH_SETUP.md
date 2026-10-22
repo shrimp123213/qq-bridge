@@ -36,7 +36,7 @@
    - `snowluma.wsUrl` / `httpUrl`（例如 `ws://127.0.0.1:3001` / `http://127.0.0.1:3000`，分别对应 OneBot WebSocket 与 HTTP API 端口）
    - `snowluma.accessToken`
    - `dsh.authToken`（新版 DSH 的 launch token，用于换取 Cookie；默认留空，桥接会自动从 DSH guard 日志发现，DSH 重启后也会自动重新发现）
-   - `ownerQQ`
+   - `ownerId`
    - `allow.private` / `allow.groups`
 
 4. **运行 DSH 端安装脚本**：
@@ -71,7 +71,7 @@
    > 已存在的 `qq-bridge/state/mode.json` 会被保留（不覆盖用户设置）；全新安装才会写入 `mode: reserved2`。
    > 如果之后把 `qq-bridge` 目录移动/重新 clone 到别的路径，请重新运行一次本脚本，否则 DSH 里的 MCP/插件绝对路径会指向旧位置。
    > 也可用环境变量指定 DSH 根目录：`DSH_HOME=/path/to/.dsh node scripts/setup-dsh.mjs <profile>`。
-   > `<profile>` 必须是单个目录名，不能包含路径分隔符或 `..` 路径跳转。离线准备配置时，可设置 `QQ_BRIDGE_SKIP_DSH_INSTALL=1` 跳过自动安装 bundle，随后手动运行 `dsh plugin --profile <profile> install`。
+   > `<profile>` 必须是单个目录名，不能包含路径分隔符或 `..` 路径跳转。离线准备配置时，可设置 `BRIDGE_SKIP_DSH_INSTALL=1` 跳过自动安装 bundle，随后手动运行 `dsh plugin --profile <profile> install`。
    > Windows 下脚本通过隐藏的 `cmd.exe` 调用 npm 的 `dsh.cmd` 启动器；`DSH_HOME` 和 profile 参数会传给该进程。
 
 5. **重启 DSH**：

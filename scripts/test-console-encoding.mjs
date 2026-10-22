@@ -4,9 +4,6 @@
 // 中文系统默认 936(GBK)：UTF-8 的「语音」被当 GBK 解码 → 乱码。
 // 本脚本用字节级往返证明这一点，并证明 chcp 65001 能把它救回来。
 import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-// 独立发语音工具在仓库上一级（不在本仓库里）：位置解析与"不在时怎么跳过"走共享口径。
-import { hasVoiceTool, skipVoiceTool, voiceToolPath } from './voice-tool-locator.mjs';
 
 const sample = '语音发送工具 简体中文 ✅';
 const utf8 = Buffer.from(sample, 'utf8');
@@ -49,18 +46,6 @@ console.log('## chcp 可用性');
     const before = spawnSync('chcp', [], { encoding: 'latin1', windowsHide: true });
     const cpText = String(before.stdout ?? '');
     ok(/\d{3,5}/.test(cpText), 'chcp 能读出当前代码页', (cpText.match(/\d{3,5}/) ?? ['?'])[0]);
-  }
-}
-
-console.log('## 工具里确实调了 chcp 且只在真控制台时调');
-if (!hasVoiceTool()) {
-  skipVoiceTool('voice-gui.mjs / voice-cli.mjs 的 chcp 65001 断言（两个入口都在仓库上一级的 voice-tool/ 里）');
-} else {
-  for (const rel of ['voice-gui.mjs', 'voice-cli.mjs']) {
-    const src = fs.readFileSync(voiceToolPath(rel), 'utf8');
-    ok(/spawn\('chcp', \['65001'\]/.test(src), `${rel} 调用 chcp 65001`);
-    ok(/isTTY/.test(src), `${rel} 用 isTTY 守卫（不干扰管道/重定向）`);
-    ok(/platform !== 'win32'|platform === 'win32'/.test(src), `${rel} 限定 Windows`);
   }
 }
 

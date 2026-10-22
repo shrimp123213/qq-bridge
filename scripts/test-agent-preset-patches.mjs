@@ -1,20 +1,19 @@
 // 钉住 DSH 0.1.7 preset 装配的「防漂移」契约（纯离线，不需要 DSH 在跑）：
-//   1. bundle patch（plugins/qq-agent-presets/presets/*.patch.yml）与仓库权威源
+//   1. bundle patch（plugins/discord-agent-presets/presets/*.patch.yml）与仓库权威源
 //      （dsh/agent-presets/<preset>/{preset.yml,agent.cordis.yml}）逐字一致；
 //   2. patch 的形状符合新机制：insert 一条 @deepseek-ai/dsh-agent-preset 行，
 //      config 里带 id/name/description/order/plugins；
 //   3. 守卫行只能用「从 profile 目录可解析」的引用方式（裸说明符），
 //      不允许任何相对/绝对路径子行名 —— 那正是 0.1.7 下静默装不上的坑；
-//   4. 安全边界（qq-tool-restrict 的 fail-closed 白名单）一份实现、所有 preset 共用；
-//   5. 派生 preset（dc-chat-v2）的行列表与 base 相同，只有人格正文按 derive.yml 改写。
+//   4. 安全边界（discord-tool-restrict 的 fail-closed 白名单）一份实现、所有 preset 共用。
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import yaml from 'js-yaml';
 import {
-  ALL_PRESETS, BUNDLE_DIR, DERIVED_PRESETS, GUARD_SPECIFIER, PRESETS, REPO_ROOT,
-  buildPatches, derivePersonaPrefix, patchFileFor, presetRowId,
+  BUNDLE_DIR, GUARD_SPECIFIER, PRESETS, REPO_ROOT,
+  buildPatches, patchFileFor, presetRowId,
 } from './build-agent-preset-patches.mjs';
 
 let failures = 0;
@@ -52,7 +51,7 @@ for (const name of PRESETS) {
   // 与源行列表逐字对比：只允许守卫行的 name 被改写。
   const source = load(path.join(REPO_ROOT, 'dsh', 'agent-presets', name, 'agent.cordis.yml'));
   const expected = structuredClone(source);
-  for (const r of expected) if (r.name === './qq-tool-restrict.mjs') r.name = GUARD_SPECIFIER;
+  for (const r of expected) if (r.name === './discord-tool-restrict.mjs') r.name = GUARD_SPECIFIER;
   assert.deepEqual(row.config.plugins, expected, `${name}: config.plugins 必须与 agent.cordis.yml 完全一致（守卫名除外）`);
   ok(true, `${name}: config.plugins 与 agent.cordis.yml 逐字一致（${expected.length} 行）`);
 
@@ -63,48 +62,15 @@ for (const name of PRESETS) {
     `${name}: persona.prefix 逐字一致（${srcPersona?.config?.prefix?.length ?? 0} 字符）`);
 }
 
-console.log('## 2b. 派生 preset：行列表照搬 base，只改写人格正文');
-for (const name of DERIVED_PRESETS) {
-  const dir = path.join(REPO_ROOT, 'dsh', 'agent-presets', name);
-  const spec = load(path.join(dir, 'derive.yml'));
-  ok(PRESETS.includes(spec?.base), `${name}: derive.yml 的 base（${spec?.base}）是源 preset`);
-  ok(!fs.existsSync(path.join(dir, 'agent.cordis.yml')), `${name}: 没有自己的 agent.cordis.yml（正文只在 base 维护）`);
-  const row = load(patchFileFor(name))[0].insert[0];
-  ok(row.id === presetRowId(name) && row.name === '@deepseek-ai/dsh-agent-preset' && row.config?.id === name,
-    `${name}: 行 id/name/config.id 形状同源 preset`);
-  const meta = load(path.join(dir, 'preset.yml'));
-  ok(row.config.name === meta.name && row.config.description === meta.description && row.config.order === meta.order,
-    `${name}: 自己 preset.yml 的 name/description/order 带进 config`);
-
-  const baseRow = load(patchFileFor(spec.base))[0].insert[0];
-  const basePrefix = baseRow.config.plugins.find((r) => r.id === 'persona').config.prefix;
-  const prefix = row.config.plugins.find((r) => r.id === 'persona')?.config?.prefix;
-  const withoutPrefix = (plugins) => plugins.map((r) => (r.id === 'persona' ? { ...r, config: { ...r.config, prefix: null } } : r));
-  assert.deepEqual(withoutPrefix(row.config.plugins), withoutPrefix(baseRow.config.plugins), `${name}: 除 persona.prefix 外必须与 ${spec.base} 完全一致`);
-  ok(true, `${name}: 除 persona.prefix 外与 ${spec.base} 逐字一致（含安全守卫，${row.config.plugins.length} 行）`);
-  ok(prefix === derivePersonaPrefix(basePrefix, spec, name), `${name}: persona.prefix = derive.yml 规则作用于 ${spec.base} 的结果`);
-  ok(prefix !== basePrefix, `${name}: 人格正文确实被改写`);
-}
-{
-  // 规则对不上必须报错，不能悄悄产出改了一半的提示词。
-  const sample = '【协议】 1. 【甲】说明甲 2. 【乙】说明乙 3. 【丙】说明丙\n尾段';
-  assert.equal(derivePersonaPrefix(sample, { removeItems: ['【乙】'] }), '【协议】 1. 【甲】说明甲 2. 【丙】说明丙\n尾段');
-  ok(true, 'derivePersonaPrefix 删除条目后同段重新编号');
-  assert.throws(() => derivePersonaPrefix(sample, { removeItems: ['【丁】'] }), /应恰好出现 1 次/);
-  assert.throws(() => derivePersonaPrefix(sample, { replace: [{ from: '不存在', to: 'x' }] }), /应恰好出现 1 次/);
-  assert.throws(() => derivePersonaPrefix(sample, { replace: [{ from: '说明', to: 'x' }] }), /应恰好出现 1 次/);
-  ok(true, 'derivePersonaPrefix 遇到找不到/不唯一的规则直接抛错');
-}
-
 console.log('## 3. 守卫行引用方式：只用「profile 目录可解析」的裸说明符');
-for (const name of ALL_PRESETS) {
+for (const name of PRESETS) {
   const row = load(patchFileFor(name))[0].insert[0];
-  const guard = row.config.plugins.find((r) => r.id === 'qq-tool-restrict');
-  ok(guard !== undefined, `${name}: 有 qq-tool-restrict 守卫行`);
+  const guard = row.config.plugins.find((r) => r.id === 'discord-tool-restrict');
+  ok(guard !== undefined, `${name}: 有 discord-tool-restrict 守卫行`);
   ok(guard?.name === GUARD_SPECIFIER, `${name}: 守卫行 name = ${GUARD_SPECIFIER}`);
   const bad = row.config.plugins.filter((r) => typeof r.name === 'string' && (r.name.startsWith('.') || path.isAbsolute(r.name)));
   ok(bad.length === 0, `${name}: 没有任何相对/绝对路径子行名（0.1.7 下会按 profile 目录解析而装不上）${bad.length ? `：${bad.map((r) => r.name).join(', ')}` : ''}`);
-  const guardFile = path.join(BUNDLE_DIR, GUARD_SPECIFIER.slice('qq-agent-presets/'.length));
+  const guardFile = path.join(BUNDLE_DIR, GUARD_SPECIFIER.slice('discord-agent-presets/'.length));
   ok(fs.existsSync(guardFile), `${name}: 守卫实现存在（${path.relative(REPO_ROOT, guardFile)}）`);
 }
 
@@ -112,40 +78,39 @@ console.log('## 4. bundle 声明与安全边界');
 {
   const pkg = JSON.parse(read(path.join(BUNDLE_DIR, 'package.json')));
   const patches = pkg.dsh?.bundle?.patch;
-  ok(Array.isArray(patches), 'qq-agent-presets 的 dsh.bundle.patch 是数组（一个 bundle 可带多层 patch）');
-  for (const name of ALL_PRESETS) {
+  ok(Array.isArray(patches), 'discord-agent-presets 的 dsh.bundle.patch 是数组（一个 bundle 可带多层 patch）');
+  ok(patches?.length === PRESETS.length, `bundle 只列出 ${PRESETS.length} 个 preset patch（没有残留的旧 preset）`);
+  for (const name of PRESETS) {
     const declared = `./presets/${name}.patch.yml`;
     ok(patches?.includes(declared), `bundle 列出了 ${declared}`);
     ok(fs.existsSync(path.join(BUNDLE_DIR, declared)), `${declared} 存在`);
   }
 
-  const canonical = path.join(BUNDLE_DIR, 'qq-tool-restrict.mjs');
+  const canonical = path.join(BUNDLE_DIR, 'discord-tool-restrict.mjs');
   const canonicalText = read(canonical);
-  for (const needle of ["const SAFE_PREFIXES", "'mcp__snowluma__'", "'mcp__web-search-safe__'", 'SAFE_EXACT', 'return `工具 "']) {
+  for (const needle of ["const SAFE_PREFIXES", "'mcp__discord__'", "'mcp__web-search-safe__'", 'SAFE_EXACT', 'return `工具 "']) {
     ok(canonicalText.includes(needle), `权威守卫包含 ${needle}`);
   }
-  // 一份实现：两个 preset 目录下的同名文件必须是 re-export 壳，且导出同名成员。
+  // 一份实现：preset 源目录里不能再放守卫副本（行里的 ./discord-tool-restrict.mjs 只是占位，
+  // 生成 patch 时改写成 bundle 里的裸说明符）。
   const canonicalMod = await import(pathToFileURL(canonical).href);
   for (const name of PRESETS) {
-    const shim = path.join(REPO_ROOT, 'dsh', 'agent-presets', name, 'qq-tool-restrict.mjs');
-    ok(/^export \* from '\.\.\/\.\.\/\.\.\/plugins\/qq-agent-presets\/qq-tool-restrict\.mjs'$/m.test(read(shim).trim()),
-      `${name}/qq-tool-restrict.mjs 是指向唯一实现的 re-export 壳`);
-    const shimMod = await import(pathToFileURL(shim).href);
-    assert.equal(shimMod.apply, canonicalMod.apply, `${name}: 壳与实现在同一模块实例上`);
-    assert.equal(shimMod.name, 'qq-tool-restrict');
-    assert.deepEqual(shimMod.inject, ['tools']);
+    const copies = fs.readdirSync(path.join(REPO_ROOT, 'dsh', 'agent-presets', name)).filter((f) => f.endsWith('.mjs'));
+    ok(copies.length === 0, `${name}: preset 源目录里没有守卫副本${copies.length ? `：${copies.join(', ')}` : ''}`);
   }
-  ok(true, 're-export 壳与权威实现导出同一份 apply/inject');
+  assert.equal(canonicalMod.name, 'discord-tool-restrict');
+  assert.deepEqual(canonicalMod.inject, ['tools']);
+  ok(true, '权威守卫导出 name/inject');
 
   // fail-closed 复检（独立于 test-audit-setup-guards.mjs 的那份假 ctx 测试）。
   let guardFn;
   const restricted = [];
   canonicalMod.apply({ tools: { restrict: ({ deny }) => restricted.push(...deny), guard: (fn) => { guardFn = fn; } } });
   ok(restricted.includes('pwsh') && restricted.includes('dev_install_package'), 'restrict 名单含本地执行面与开发注入器工具');
-  for (const name of ['ask_user_question', 'todo_write', 'mcp__snowluma__chat_send_message', 'mcp__web-search-safe__web_fetch']) {
+  for (const name of ['ask_user_question', 'todo_write', 'mcp__discord__chat_send_message', 'mcp__web-search-safe__web_fetch']) {
     assert.equal(guardFn({ name }), undefined, `白名单应放行 ${name}`);
   }
-  ok(true, '白名单放行 QQ MCP 与无害模型侧工具');
+  ok(true, '白名单放行 Discord MCP 与无害模型侧工具');
   let deniedAll = true;
   for (const name of ['bash', 'read', 'write', 'dev_future_unknown_tool', 'mcp__other__x', '', null, undefined, 123]) {
     if (typeof guardFn({ name }) !== 'string') deniedAll = false;

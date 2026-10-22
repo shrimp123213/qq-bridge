@@ -115,7 +115,7 @@ export function createTokenLedger({
   const samples = new Map();
   /** sessionId -> { turn, step, retry, seq }：重试轴，用于区分同一步骤的多次计费请求 */
   const retryAxis = new Map();
-  /** sessionId -> 最近一次见到的会话 key（会话退役后仍可归属到原 QQ 会话） */
+  /** sessionId -> 最近一次见到的会话 key（会话退役后仍可归属到原聊天会话） */
   const sessionKeys = new Map();
   /** sessionId -> 被淘汰（只剩累计值、无法再拆到某一轮）的采样汇总 */
   const evicted = new Map();
@@ -312,7 +312,7 @@ export function createTokenLedger({
    *
    * 为什么必须有淘汰：`compact()` 只是把内存态「重写」一遍 —— 如果内存本身无限增长，
    * 那么一旦条数越过上限，**之后每一条采样**都会触发一次整文件同步重写（多 MB 的
-   * JSONL 写在 QQ 事件路径上），而且内存会一直涨。所以压缩必须真的丢东西。
+   * JSONL 写在 Discord 事件路径上），而且内存会一直涨。所以压缩必须真的丢东西。
    *
    * 关键：**丢明细不能丢总量**。被淘汰的采样先把桶累加进 `evicted`（连同它自己那一次的
    * 计价结果），读取时照样算进权威累计；只是这些旧回合不再能拆到具体某一轮，控制台会
@@ -499,7 +499,7 @@ export function createTokenLedger({
   /**
    * 单遍索引：一次扫过所有采样，算出每个会话需要的全部聚合量。
    *
-   * 为什么必须这么写：控制台每 3 秒拉一次 `/api/tokens/summary`，而它跑在**和 QQ 事件
+   * 为什么必须这么写：控制台每 3 秒拉一次 `/api/tokens/summary`，而它跑在**和 Discord 事件
    * 同一个事件循环**里。原先 summary 对每个会话都重扫一遍全部采样（O(会话数 × 采样数)，
    * 而且 sessionTotals/sessionCost/turnRows 各扫一遍 = 3 倍），几千条采样、几十个会话
    * 就是百万级迭代。这里压成单遍 O(采样数)。

@@ -15,10 +15,10 @@ await test('closed-agent session is not reused after switching to chat', async (
   h.setMode('chat');
   const restricted = await h.ensureSession('private:123');
   assert.notEqual(restricted, privileged);
-  assert.equal(h.calls.created.at(-1).agentPreset, 'qq-chat');
+  assert.equal(h.calls.created.at(-1).agentPreset, 'dc-chat');
   assert.ok(h.calls.cancelled.includes(privileged));
 });
-await test('unavailable preset catalogue fails closed for QQ and learner sessions', async (h) => {
+await test('unavailable preset catalogue fails closed for chat and learner sessions', async (h) => {
   h.setPresets([]);
   assert.equal(h.resolvePresetName('missing', { strict: true }), '');
   await assert.rejects(h.ensureSession('group:456'));
@@ -42,7 +42,7 @@ await test('session creation crossing a mode change never accepts stale permissi
   assert.equal(h.state.sessions['private:123'], undefined);
 });
 await test('queued send rechecks allowlist at actual transport time', async (h) => {
-  const sending = h.sendToQQ('group:456', 'fixture');
+  const sending = h.sendToChat('group:456', 'fixture');
   h.cfg.allow.groups = [];
   await sending;
   assert.equal(h.calls.sent.length, 0);
@@ -118,24 +118,6 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
   } catch (error) { failures++; console.error('FAIL console reset cleanup:', error.message); }
   finally { await new Promise((resolve) => server.close(resolve)); await h.close(); }
 }
-{
-  const image = Buffer.from('89504e470d0a1a0a00000000', 'hex');
-  let body;
-  const h = await bridgeHarness({ globals: {
-    safeFetchBuffer: async () => ({ buffer: image }),
-    validateFetchUrl: async () => { throw new Error('must fetch validated bytes instead of passing a URL'); },
-    fetch: async (_url, init) => {
-      body = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: { message_id: 1 } }) };
-    },
-  } });
-  try {
-    await h.sendStickerV2('group:456', 'fixture-sticker');
-    assert.equal(body.message.find((part) => part.type === 'image').data.file, 'base64://' + image.toString('base64'));
-    console.log('PASS sticker sending gives OneBot validated bytes, never a URL to refetch');
-  } catch (error) { failures++; console.error('FAIL safe sticker sending:', error.message); }
-  finally { await h.close(); }
-}
 // ── 语音发送（AI 通道）的安全边界 ────────────────────────────────────────────
 // 语音比文本更"重"（真的会说话、不可撤回），所以这里逐条钉住它的闸门：
 // 来源只能是语音库、白名单必须命中、限流要生效、文件名审计要拦住本机路径。
@@ -172,18 +154,16 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
       assert.throws(() => h.resolveVoicePathForV2(bad), /不接受|只能/, `AI 传 ${bad.split(':')[0]} 来源被拒`);
     }
 
-    // 4) 真发一条（虚拟网关）：必须是 record 段、且 file 指向库内文件
-    const sent = await h.sendVoiceForV2('group:456', 'hello.mp3', { readback: false });
-    const call = h.calls.http.find((c) => c.url.endsWith('/send_group_msg'));
-    assert.ok(call, '语音走 send_group_msg');
-    assert.equal(call.body.group_id, 456, '语音发给正确群');
-    assert.equal(call.body.message.length, 1, '语音只发一个段');
-    assert.equal(call.body.message[0].type, 'record', '段类型是 record');
-    assert.equal(call.body.message[0].data.file, path.join(audioDir, 'hello.mp3'), 'record 段指向库内绝对路径');
-    assert.equal(sent.messageId, 9001, '返回网关 message_id');
-    assert.equal(sent.readback, null, '显式关掉回读时不调 fetch_ptt_text');
+    // 4) 真发一条（假 Discord 适配层）：音频附件必须指向库内文件
+    const sent = await h.sendVoiceForV2('group:456', 'hello.mp3');
+    const call = h.calls.voices.at(-1);
+    assert.ok(call, '语音走 platform.sendVoice');
+    assert.equal(call.kind, 'group', '语音发到频道');
+    assert.equal(call.id, '456', '语音发给正确频道');
+    assert.equal(call.file, path.join(audioDir, 'hello.mp3'), '音频附件指向库内绝对路径');
+    assert.equal(sent.messageId, '9001', '返回 Discord 消息 id');
 
-    // 5) 落地校验：默认用 get_msg 回读确认这条消息真的带 record 段
+    // 5) 落地校验：默认回读这条消息、确认音频附件真的在
     const h2 = await bridgeHarness({ config: voiceOn });
     try {
       const dir2 = path.join(h2.temp, 'audio');
@@ -191,13 +171,13 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
       fs.writeFileSync(path.join(dir2, 'hi.mp3'), Buffer.alloc(512, 1));
       const sent2 = await h2.sendVoiceForV2('group:456', 'hi.mp3');
       // 注意：这些对象来自 vm realm，deepEqual 会因原型不同而失败 → 逐字段断言
-      assert.equal(sent2.verification?.confirmed, true, '默认回读 get_msg 确认 record 段');
+      assert.equal(sent2.verification?.confirmed, true, '默认回读确认音频附件');
       assert.equal(sent2.verification?.duration, 3, '回读到语音时长');
-      // 校验结果**不能**把源文件路径回传给 AI（私聊 get_msg 会把本机路径塞进 record.url）
+      // 校验结果**不能**把源文件路径回传给 AI
       assert.equal(sent2.verification?.file, undefined, '校验结果不回传文件路径（防路径泄露进模型上下文）');
-      assert.ok(h2.calls.http.some((c) => c.url.endsWith('/get_msg')), '校验走 get_msg');
-      assert.equal(sent2.readback, null, '默认不索取转写（自己发的语音没有转写）');
-      // 关掉校验时不发 get_msg
+      assert.equal(h2.calls.confirms.length, 1, '校验回读了一次');
+      assert.equal(h2.calls.confirms[0], sent2.messageId, '回读的正是刚发出的那条');
+      // 关掉校验时不回读
       const h2b = await bridgeHarness({ config: voiceOn });
       try {
         const dir2b = path.join(h2b.temp, 'audio');
@@ -205,7 +185,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
         fs.writeFileSync(path.join(dir2b, 'hi.mp3'), Buffer.alloc(512, 1));
         const sent2b = await h2b.sendVoiceForV2('group:456', 'hi.mp3', { verify: false });
         assert.equal(sent2b.verification, null, 'verify=false 时不做回读校验');
-        assert.ok(!h2b.calls.http.some((c) => c.url.endsWith('/get_msg')), 'verify=false 时不发 get_msg');
+        assert.equal(h2b.calls.confirms.length, 0, 'verify=false 时不回读');
       } finally { await h2b.close(); }
     } finally { await h2.close(); }
 
@@ -213,7 +193,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
     //    resolveVoicePathForV2 允许绝对路径的"文件名形态"由 allowAbsolutePath 管；
     //    这里直接喂一个**看起来就像本机路径**的名字，验证审计层会拦下来。
     await assert.rejects(
-      () => h.sendVoiceForV2('group:456', 'C:\\Users\\somebody\\secret-voice.mp3', { readback: false }),
+      () => h.sendVoiceForV2('group:456', 'C:\\Users\\somebody\\secret-voice.mp3'),
       /敏感信息|语音库|绝对路径/,
       '文件名含本机路径特征被审计/来源校验拦截'
     );
@@ -224,9 +204,9 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
       const dir3 = path.join(h3.temp, 'audio');
       fs.mkdirSync(dir3, { recursive: true });
       fs.writeFileSync(path.join(dir3, 'a.mp3'), Buffer.alloc(512, 1));
-      await h3.sendVoiceForV2('group:456', 'a.mp3', { readback: false });
+      await h3.sendVoiceForV2('group:456', 'a.mp3');
       await assert.rejects(
-        () => h3.sendVoiceForV2('group:456', 'a.mp3', { readback: false }),
+        () => h3.sendVoiceForV2('group:456', 'a.mp3'),
         /频率超限|每分钟/,
         '同一分钟内第二条语音被限流（每分钟 1 条）'
       );
@@ -238,8 +218,8 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
         fs.writeFileSync(path.join(dir4, 'a.mp3'), Buffer.alloc(512, 1));
         await assert.rejects(() => h4.sendVoiceForV2('group:456', 'nope.mp3'), /找不到/, '不存在的音频被拒');
         // 失败没有消耗额度 → 紧接着真发一条应当成功
-        const ok2 = await h4.sendVoiceForV2('group:456', 'a.mp3', { readback: false });
-        assert.equal(ok2.messageId, 9001, '失败不吃额度：随后发送成功');
+        const ok2 = await h4.sendVoiceForV2('group:456', 'a.mp3');
+        assert.equal(ok2.messageId, '9001', '失败不吃额度：随后发送成功');
       } finally { await h4.close(); }
     } finally { await h3.close(); }
 
@@ -256,7 +236,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
       fs.mkdirSync(dir6, { recursive: true });
       fs.writeFileSync(path.join(dir6, 'a.mp3'), Buffer.alloc(512, 1));
       const sent6 = await h6.sendVoiceV2('group:456', path.join(dir6, 'a.mp3'), { guard: false, audit: true });
-      assert.equal(sent6.messageId, 9001, 'voice.enabled=false 时操作者仍能发（AI 开关不该封死手动路径）');
+      assert.equal(sent6.messageId, '9001', 'voice.enabled=false 时操作者仍能发（AI 开关不该封死手动路径）');
     } finally { await h6.close(); }
 
     // 10) 音量：倍数会传给音频处理，并原样回报给调用方
@@ -295,8 +275,8 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
 
 // ── 语音路径：allowAbsolutePath 不再放宽 AI 通道（任意本机音频外发）────────────
 // 审计发现：开关打开时 resolveVoicePathForV2 会把 AI 给的绝对路径直接交给
-// resolveAudioSource 解析，于是群友用提示注入就能让 AI 把本机任意音频（< 20MB）
-// 发到群里；而 inspectAudio 在 ffprobe 不可用时对任何文件都放行。
+// resolveAudioSource 解析，于是成员用提示注入就能让 AI 把本机任意音频（< 20MB）
+// 发到频道里；而 inspectAudio 在 ffprobe 不可用时对任何文件都放行。
 // 现在即使开了开关，绝对路径也必须落在语音库目录之内。
 {
   const fs = await import('node:fs');
@@ -313,26 +293,26 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
 
     // 库外的绝对路径必须被拒绝（即使 allowAbsolutePath=true）
     await assert.rejects(
-      () => h.sendVoiceForV2('group:456', outsideFile, { readback: false }),
+      () => h.sendVoiceForV2('group:456', outsideFile),
       /语音库/,
       'allowAbsolutePath=true 时库外绝对路径仍必须被拒绝'
     );
     // 相对穿越同样必须被拒绝
     await assert.rejects(
-      () => h.sendVoiceForV2('group:456', path.join('..', 'outside', 'secret.mp3'), { readback: false }),
+      () => h.sendVoiceForV2('group:456', path.join('..', 'outside', 'secret.mp3')),
       /语音库|\.\./,
       '相对路径穿越必须被拒绝'
     );
     // 库内的绝对路径应当仍然可用（开关的合理用途）
-    const inside = await h.sendVoiceForV2('group:456', path.join(libraryDir, 'inside.mp3'), { readback: false });
-    assert.equal(inside.messageId, 9001, '库内绝对路径仍可发送');
+    const inside = await h.sendVoiceForV2('group:456', path.join(libraryDir, 'inside.mp3'));
+    assert.equal(inside.messageId, '9001', '库内绝对路径仍可发送');
     console.log('PASS voice absolute paths stay confined to the library even when allowAbsolutePath is on');
   } catch (error) { failures++; console.error('FAIL voice library confinement:', error.message); }
   finally { await h.close(); }
 }
 
 // agent token 默认拒绝：MCP 的 v2 工具同时携带 x-console-token 与 x-agent-token，
-// 因此仅靠控制台令牌挡不住 QQ 群里的 AI。人格/提示词/思考强度/白名单/重启等管理端点
+// 因此仅靠控制台令牌挡不住频道里的 AI。人格/提示词/思考强度/白名单/重启等管理端点
 // 必须对 agent token 一律 403，否则 AI 能改写自己的系统提示词或给自己提权。
 {
   const h = await bridgeHarness();

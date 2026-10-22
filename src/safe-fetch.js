@@ -1,4 +1,4 @@
-// 只读 HTTP(S) 安全抓取工具：供 qq-bridge / MCP 共用。
+// 只读 HTTP(S) 安全抓取工具：供桥接 / MCP 共用。
 // 设计目标与 mcp-web-search-safe 一致：
 // - 仅 http/https
 // - 禁止 localhost / .local / 私有 IP / 环回 / 链路本地 / CGNAT 等内网地址
@@ -113,9 +113,8 @@ export function isPrivateIp(ip) {
  * 把校验过的地址排成「尝试顺序」。
  *
  * 为什么不能只取第一个：DNS 返回顺序是**轮转/不确定**的，而本机常常只有 IPv4 出口。
- * QQ 的表情 CDN（gxh.vip.qq.com / p.qpic.cn / multimedia.nt.qq.com.cn）和
- * raw.githubusercontent.com 都同时有 AAAA/A 记录 —— 抢到第一个 AAAA 的那次请求会一路
- * 连到 20 秒超时，其余请求正常，于是表现为「**部分**表情包/图片/网页时好时坏」。
+ * 很多 CDN（例如 raw.githubusercontent.com）同时有 AAAA/A 记录 —— 抢到第一个 AAAA 的
+ * 那次请求会一路连到 20 秒超时，其余请求正常，于是表现为「**部分**图片/网页时好时坏」。
  * 这里优先 IPv4，并把两个族交替排布：v4 全部不可用时还能试 v6（v6-only 主机同理）。
  * @param {{address: string, family: number}[]} addresses
  * @returns {string[]} 地址字符串（已按尝试顺序排列）

@@ -1,5 +1,5 @@
 /**
- * Per-conversation policy routing for the QQ bridge.
+ * Per-conversation policy routing for the Discord bridge.
  *
  * Why this module exists (P2 of QSH_PLAN.md §3):
  *   The bridge historically kept ONE process-global `currentMode`. That makes
@@ -73,20 +73,20 @@ const ALL_MODES = Object.freeze([...SIMULATION_MODES, 'simulation', 'closed-agen
  * — and `[0]` is the preset this layer emits by default, exactly as
  * QSH_PLAN.md §3.1 writes `"defaults": { "mode": "simulation", "preset":
  * "qsh-sim" }`. The legacy spellings keep the presets that are actually
- * installed today (`qq-chat` / `qq-chat-v2`), so a config written before the P3
+ * installed today (`dc-chat` / `dc-chat-v2`), so a config written before the P3
  * rename stays loadable *and* `reserved2 + qsh-sim` stays a detectable mismatch
  * instead of silently resolving to a preset that deployment never installed.
  * Deployments that install a different generation pass their own table through
  * the `modePresets` option — that is why both lists exist rather than one.
  */
 const DEFAULT_MODE_PRESETS = Object.freeze({
-  chat: Object.freeze(['qq-chat']),
-  reserved: Object.freeze(['qq-chat']),
-  reserved2: Object.freeze(['qq-chat-v2']),
+  chat: Object.freeze(['dc-chat']),
+  reserved: Object.freeze(['dc-chat']),
+  reserved2: Object.freeze(['dc-chat-v2']),
   // `simulation` is the canonical spelling of `reserved2`. It leads with the
-  // canonical preset names; `qq-chat-v2` stays accepted because that is the
+  // canonical preset names; `dc-chat-v2` stays accepted because that is the
   // preset the still-legacy bridge actually installs for this mode.
-  simulation: Object.freeze(['qsh-sim', 'qsh-sim-v2', 'qq-chat-v2']),
+  simulation: Object.freeze(['qsh-sim', 'qsh-sim-v2', 'dc-chat-v2']),
   'closed-agent': Object.freeze(['qsh-closed']),
 });
 
@@ -138,15 +138,15 @@ function isPlainObject(v) {
 
 /**
  * Canonicalise `private:<id>` / `group:<id>`.
- * Mirrors the bridge's own canonicalV2Key: only `\d+`, safe integer, non-zero.
+ * Mirrors the bridge's own canonicalId: only digits, non-zero, at most 20
+ * significant digits (a Discord snowflake), leading zeros dropped. The id stays
+ * a string because snowflakes do not fit in a safe integer.
  * Returns null for anything else so callers can fail closed explicitly.
  */
 export function canonicalConversationKey(key) {
-  const m = /^(group|private):(\d+)$/.exec(String(key ?? '').trim());
+  const m = /^(group|private):0*([1-9]\d{0,19})$/.exec(String(key ?? '').trim());
   if (!m) return null;
-  const id = Number(m[2]);
-  if (!Number.isSafeInteger(id) || id <= 0) return null;
-  return `${m[1]}:${id}`;
+  return `${m[1]}:${m[2]}`;
 }
 
 function requireKey(key) {
@@ -155,16 +155,20 @@ function requireKey(key) {
   return c;
 }
 
-/** ownerQQ may be a number or a numeric string; anything else is a config error. */
-function normalizeOwnerQQ(ownerQQ) {
-  if (ownerQQ === null || ownerQQ === undefined || ownerQQ === '') return null;
-  const t = typeof ownerQQ;
-  if (t !== 'string' && t !== 'number') {
-    throw new TypeError('ownerQQ must be a positive safe integer or omitted');
+/**
+ * ownerId may be a numeric string or a safe-integer number; anything else is a
+ * config error. A number above 2^53 was already truncated by JSON.parse, so it
+ * is rejected instead of being trusted as some other user's id.
+ */
+function normalizeOwnerId(ownerId) {
+  if (ownerId === null || ownerId === undefined || ownerId === '') return null;
+  const t = typeof ownerId;
+  if ((t !== 'string' && t !== 'number') || (t === 'number' && !Number.isSafeInteger(ownerId))) {
+    throw new TypeError('ownerId must be a numeric user id string or omitted');
   }
-  const c = canonicalConversationKey(`private:${String(ownerQQ).trim()}`);
-  if (c === null) throw new TypeError('ownerQQ must be a positive safe integer or omitted');
-  return Number(c.slice('private:'.length));
+  const c = canonicalConversationKey(`private:${String(ownerId).trim()}`);
+  if (c === null) throw new TypeError('ownerId must be a numeric user id string or omitted');
+  return c.slice('private:'.length);
 }
 
 function optionalText(value, field) {
@@ -181,9 +185,8 @@ function optionalText(value, field) {
  * Strictly a string. `String(mode)` would accept any object whose `toString`
  * happens to return an alias — e.g. `{ toString: () => 'closed-agent' }` out of
  * a hand-edited JSON file would select the privileged mode instead of being
- * rejected as the type error it is. `normalizeOwnerQQ` has to coerce because QQ
- * ids are legitimately written both as number and string; a mode name is only
- * ever a string.
+ * rejected as the type error it is. `normalizeOwnerId` has to coerce because a
+ * small id may be written as a JSON number; a mode name is only ever a string.
  */
 export function normalizeMode(mode) {
   if (typeof mode !== 'string') {
@@ -257,11 +260,11 @@ function normalizePolicy(record, label, ownerKey, modePresets, { isDefault = fal
   // One boundary, one message: whether the owner is unconfigured or the key is
   // simply not the owner's, the reason a `closed-agent` record is refused is the
   // same — this key is not the owner's private conversation. Reporting
-  // "requires a configured ownerQQ" only in the first case made the same
+  // "requires a configured ownerId" only in the first case made the same
   // rejection read as two unrelated errors depending on deployment state.
   if (mode === 'closed-agent' && label !== ownerKey) {
     throw new TypeError(ownerKey === null
-      ? 'closed-agent is restricted to the owner private conversation (no ownerQQ is configured)'
+      ? 'closed-agent is restricted to the owner private conversation (no ownerId is configured)'
       : 'closed-agent is restricted to the owner private conversation');
   }
 
@@ -281,7 +284,7 @@ function normalizePolicy(record, label, ownerKey, modePresets, { isDefault = fal
   return normalized;
 }
 
-function normalizeState(state, ownerQQ, modePresets) {
+function normalizeState(state, ownerId, modePresets) {
   if (!isPlainObject(state) || state.version !== 1) {
     throw new TypeError('conversation state must have version 1');
   }
@@ -300,7 +303,7 @@ function normalizeState(state, ownerQQ, modePresets) {
     rawKeys.set(key, rawKey);
   }
 
-  const ownerKey = ownerQQ === null ? null : `private:${ownerQQ}`;
+  const ownerKey = ownerId === null ? null : `private:${ownerId}`;
   const conversations = {};
   for (const [key, rawKey] of rawKeys) {
     conversations[key] = normalizePolicy(state.conversations[rawKey], key, ownerKey, modePresets);
@@ -311,17 +314,17 @@ function normalizeState(state, ownerQQ, modePresets) {
 /**
  * Build the initial conversations state.
  *
- * @param ownerQQ  the admin's QQ, or null/'' when not configured yet
+ * @param ownerId  the admin's user id, or null/'' when not configured yet
  * @param options.defaultMode  the global mode to keep as the fallback default,
  *                             so adopting this module does not change behaviour
  * @param options.closedAgentEnabled  whether owner-private starts as closed-agent
  */
-export function createInitialConversationState(ownerQQ, {
+export function createInitialConversationState(ownerId, {
   defaultMode = null,
   closedAgentEnabled = true,
   modePresets,
 } = {}) {
-  const owner = normalizeOwnerQQ(ownerQQ);
+  const owner = normalizeOwnerId(ownerId);
   if (typeof closedAgentEnabled !== 'boolean') {
     throw new TypeError('closedAgentEnabled must be boolean');
   }
@@ -372,11 +375,11 @@ export function createInitialConversationState(ownerQQ, {
  * Explicit migration from the single global mode to per-conversation state.
  * Returns the events the caller must persist (this module never writes).
  */
-export function migrateLegacyMode({ mode, ownerQQ, modePresets } = {}) {
+export function migrateLegacyMode({ mode, ownerId, modePresets } = {}) {
   if (!ALL_MODES.includes(mode)) {
     throw new TypeError('Unknown legacy mode; refusing migration');
   }
-  const owner = normalizeOwnerQQ(ownerQQ);
+  const owner = normalizeOwnerId(ownerId);
   const closedAgentEnabled = mode === 'closed-agent' && owner !== null;
   const state = createInitialConversationState(owner, {
     defaultMode: mode,
@@ -384,7 +387,7 @@ export function migrateLegacyMode({ mode, ownerQQ, modePresets } = {}) {
     modePresets,
   });
   // 迁移事件没有"静默"分支：旧写法在 `mode === 'reserved2' && owner === null` 时返回 events: []，
-  // 而"老配置是二代仿真 + 从没配过 ownerQQ"恰恰是最常见的一次迁移 —— 也就是说最常见的迁移是唯一
+  // 而"老配置是二代仿真 + 从没配过 ownerId"恰恰是最常见的一次迁移 —— 也就是说最常见的迁移是唯一
   // 不留审计记录的那种，与本模块"caller must persist the events"的契约直接矛盾：调用方按约定落盘，
   // 却什么都落不下来，事后无法回答"这批会话的默认模式是什么时候、按哪次迁移改的"。
   // （`closedAgentEnabled === false` 这一项对 reserved2 恒为真，所以那个条件实际只是在判断 owner === null。）
@@ -393,7 +396,7 @@ export function migrateLegacyMode({ mode, ownerQQ, modePresets } = {}) {
     from: mode,
     to: closedAgentEnabled ? 'closed-agent for owner private; default elsewhere' : `default ${state.defaults.mode}`,
     ownerKey: closedAgentEnabled ? `private:${owner}` : null,
-    reason: mode === 'closed-agent' && owner === null ? 'missing ownerQQ; downgraded' : null,
+    reason: mode === 'closed-agent' && owner === null ? 'missing ownerId; downgraded' : null,
   }];
   if (closedAgentEnabled) state.conversations[`private:${owner}`].updatedBy = 'migration';
   return { state, events };
@@ -412,25 +415,25 @@ export function migrateLegacyMode({ mode, ownerQQ, modePresets } = {}) {
  * back what it had just written.
  */
 export class SessionRouter {
-  #ownerQQ;
+  #ownerId;
   #defaultMode;
   #state;
   #now;
   #modePresets;
 
-  constructor({ ownerQQ = null, defaultMode = 'reserved2', state, now = Date.now, modePresets } = {}) {
+  constructor({ ownerId = null, defaultMode = 'reserved2', state, now = Date.now, modePresets } = {}) {
     if (typeof now !== 'function') throw new TypeError('now must be a function');
     this.#now = now;
-    this.#ownerQQ = normalizeOwnerQQ(ownerQQ);
+    this.#ownerId = normalizeOwnerId(ownerId);
     this.#modePresets = modePresets ?? buildModePresets();
 
     const init = state === undefined
-      ? createInitialConversationState(this.#ownerQQ, { defaultMode, modePresets: this.#modePresets })
+      ? createInitialConversationState(this.#ownerId, { defaultMode, modePresets: this.#modePresets })
       : state;
     // Loading is the provisioning path: the state we are handed was written by
     // `createInitialConversationState` / `migrateLegacyMode`, whose `updatedBy`
     // is `first-run` / `migration` — see `normalizePolicy`.
-    this.#state = normalizeState(init, this.#ownerQQ, this.#modePresets);
+    this.#state = normalizeState(init, this.#ownerId, this.#modePresets);
 
     // An explicit defaultMode wins over the persisted default: the DSH setting
     // is still authoritative for "what is the global mode right now". It cannot
@@ -441,7 +444,7 @@ export class SessionRouter {
     this.#defaultMode = this.#state.defaults.mode;
   }
 
-  get ownerQQ() { return this.#ownerQQ; }
+  get ownerId() { return this.#ownerId; }
   get defaultMode() { return this.#defaultMode; }
   /** Allowed presets per mode, as supplied by the caller. */
   get modePresets() { return this.#modePresets; }
@@ -529,13 +532,13 @@ export class SessionRouter {
     const canonical = canonicalConversationKey(key);
     if (canonical === null) return false;
     if (this.modeFor(canonical) !== 'closed-agent') return true;
-    return this.#ownerQQ !== null && canonical === `private:${this.#ownerQQ}`;
+    return this.#ownerId !== null && canonical === `private:${this.#ownerId}`;
   }
 
   /** Stable identity of the policy; a change means the session must be rebuilt. */
   policyFingerprint(key) {
     const { mode, preset, model, reasoningEffort } = this.policyFor(key);
-    return JSON.stringify([mode, preset, model, reasoningEffort, this.#ownerQQ]);
+    return JSON.stringify([mode, preset, model, reasoningEffort, this.#ownerId]);
   }
 
   /**
@@ -544,7 +547,7 @@ export class SessionRouter {
    */
   setConversation(key, record) {
     const canonical = requireKey(key);
-    const ownerKey = this.#ownerQQ === null ? null : `private:${this.#ownerQQ}`;
+    const ownerKey = this.#ownerId === null ? null : `private:${this.#ownerId}`;
     // Load-bearing, not redundant: this is where a *live* actor is
     // authenticated. `normalizeState` below accepts `first-run`/`migration`
     // because it must be able to re-read records provisioning already wrote, so
@@ -560,7 +563,7 @@ export class SessionRouter {
       ...this.#state,
       conversations: { ...this.#state.conversations, [canonical]: record },
     };
-    const next = normalizeState(candidate, this.#ownerQQ, this.#modePresets);
+    const next = normalizeState(candidate, this.#ownerId, this.#modePresets);
     const at = this.#auditAt();
     this.#state = next;
 
@@ -589,7 +592,7 @@ export class SessionRouter {
   /** Remove an override so the conversation falls back to the default. */
   deleteConversation(key, { updatedBy } = {}) {
     const canonical = requireKey(key);
-    const ownerKey = this.#ownerQQ === null ? null : `private:${this.#ownerQQ}`;
+    const ownerKey = this.#ownerId === null ? null : `private:${this.#ownerId}`;
     const actor = requireUpdatedBy(updatedBy, ownerKey, { allowSystem: false });
 
     const before = this.policyFor(canonical);
@@ -598,7 +601,7 @@ export class SessionRouter {
 
     const conversations = { ...this.#state.conversations };
     delete conversations[canonical];
-    const next = normalizeState({ ...this.#state, conversations }, this.#ownerQQ, this.#modePresets);
+    const next = normalizeState({ ...this.#state, conversations }, this.#ownerId, this.#modePresets);
     const at = this.#auditAt();
     this.#state = next;
 

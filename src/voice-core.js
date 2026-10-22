@@ -1,9 +1,8 @@
-// 语音发送的共享内核：独立工具（上级 voice-tool/ 的 voice-cli.mjs / voice-gui.mjs）与桥接都用同一套规则。
+// 语音发送的共享内核：桥接与 scripts/send-voice.mjs 都用同一套规则。
 //
 // 这里的函数是**纯工具**（无全局副作用、不读 config 单例），调用方把配置传进来：
-//   - voice-cli.mjs / voice-gui.mjs（在 ../voice-tool/）：直连 SnowLuma，
-//     经 `../qq-bridge/src/voice-core.js` 引本文件（唯一实现，不复制）；配置读 voice-tool/config.json
 //   - src/bridge.js：自己管白名单/限流/审计，但音频解析与 ffprobe 探测复用这里
+//   - scripts/send-voice.mjs：发送前的本地探测与目标解析
 //
 // 关键设计：ffprobe 结果**写临时文件**而不是走 stdout 管道。
 // 在受限沙箱（DSH workspace-write / 只读模式）里 spawn 一个 stdio:pipe 的子进程会直接
@@ -13,14 +12,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-/** 网关能直接吃进去的音频扩展名（SnowLuma 会自动转 SILK）。 */
+/** 当作语音库文件的音频扩展名（以音频附件发到 Discord）。 */
 export const AUDIO_EXTS = [
   '.mp3', '.wav', '.ogg', '.oga', '.opus', '.m4a', '.aac', '.flac',
-  '.amr', '.silk', '.slk', '.wma', '.spx'
+  '.wma', '.spx'
 ];
-
-/** 已经是 QQ 原生 SILK 的扩展名：跳过探测。 */
-const SILK_EXTS = new Set(['.silk', '.slk']);
 
 export const DEFAULT_MAX_BYTES = 20 * 1024 * 1024;
 export const DEFAULT_MAX_SECONDS = 300;
@@ -200,7 +196,7 @@ export async function probeAudio(file, { ffprobePath = 'ffprobe', timeoutMs = 10
   }
 }
 
-/** 校验音频是否适合当 QQ 语音发。返回 { ok, size, duration, codec, warnings[], error }。 */
+/** 校验音频是否适合当语音发。返回 { ok, size, duration, codec, warnings[], error }。 */
 export async function inspectAudio(file, {
   maxBytes = DEFAULT_MAX_BYTES,
   maxSeconds = DEFAULT_MAX_SECONDS,
@@ -212,21 +208,18 @@ export async function inspectAudio(file, {
   if (!st.isFile()) return { ok: false, error: '不是文件（目录？）' };
   if (st.size === 0) return { ok: false, error: '文件为空' };
   if (st.size > maxBytes) return { ok: false, size: st.size, error: `文件过大（${formatBytes(st.size)} > 上限 ${formatBytes(maxBytes)}）` };
-  if (!isAudioFile(file)) warnings.push(`扩展名 ${path.extname(file) || '(无)'} 不在常见音频列表内，将交给网关自行识别`);
+  if (!isAudioFile(file)) warnings.push(`扩展名 ${path.extname(file) || '(无)'} 不在常见音频列表内，Discord 客户端可能无法直接播放`);
 
-  if (SILK_EXTS.has(path.extname(file).toLowerCase())) {
-    return { ok: true, size: st.size, duration: null, codec: 'silk', formatName: 'silk', warnings };
-  }
   const p = await probeAudio(file, { ffprobePath });
   if (!p.ok) {
-    warnings.push(`无法探测时长（${p.reason}）：将不做时长校验，直接交给网关`);
+    warnings.push(`无法探测时长（${p.reason}）：将不做时长校验，直接发送`);
     return { ok: true, size: st.size, duration: null, codec: '', formatName: '', warnings };
   }
   if (p.duration > maxSeconds) {
     return { ok: false, size: st.size, duration: p.duration, codec: p.codec, error: `时长 ${formatDuration(p.duration)} 超过上限 ${formatDuration(maxSeconds)}` };
   }
   if (p.duration > 60) warnings.push(`时长 ${formatDuration(p.duration)} 较长，可能会显示为长语音`);
-  if (!p.codec) warnings.push('没找到音频流，网关转码可能失败');
+  if (!p.codec) warnings.push('没找到音频流，Discord 客户端可能无法播放');
   return {
     ok: true, size: st.size, duration: p.duration, codec: p.codec,
     formatName: p.formatName, sampleRate: p.sampleRate, channels: p.channels, warnings
@@ -247,8 +240,8 @@ export function describeAudio(info) {
 /**
  * 目标 key 解析：group:123 / private:123。
  *
- * 号码必须是**正整数**（不以 0 开头）：QQ 号与群号都不可能是 0，
- * 放 `group:0` 过去只会让一个必然失败的请求走到网关。
+ * 号码必须是**正整数**（不以 0 开头）：Discord 的频道/用户 id 都不可能是 0，
+ * 放 `group:0` 过去只会让一个必然失败的请求走到 Discord。
  * 非零开头同时也挡住了 `group:007` 这种写法。
  */
 export function parseTargetKey(key) {
@@ -287,9 +280,8 @@ export function uniqueLibraryPath(voiceDir, filename) {
 
 // ── 音量调节 ────────────────────────────────────────────────────────────────
 //
-// 为什么在**本地**做：SnowLuma 只接受「音频文件」并自己转 SILK，没有音量参数
-// （record 段只有 file/magic/url 之类，没有增益字段）。所以音量必须在交给网关之前
-// 用 ffmpeg 调好，再把处理后的文件当普通音频发出去。
+// 为什么在**本地**做：Discord 的附件就是原样的文件，没有音量参数。
+// 所以音量必须在上传之前用 ffmpeg 调好，再把处理后的文件当普通音频发出去。
 //
 // 两种模式：
 //   · volume 倍数/分贝 —— volume=2.0 或 volume=3dB。直观，可复现。
@@ -297,7 +289,7 @@ export function uniqueLibraryPath(voiceDir, filename) {
 //     对"录音忽大忽小/整体太小"最有效；但它会**大幅改变动态**，不适合有音乐/音效的内容。
 //     （曾经考虑 speechnorm，但它对非语音内容会过度抬升噪声，故不作为默认智能模式。）
 
-/** 音量倍数范围（1.0 = 原样）。QQ 语音常见需求是"调大"，所以上限给到 4 倍。 */
+/** 音量倍数范围（1.0 = 原样）。语音常见需求是"调大"，所以上限给到 4 倍。 */
 export const VOLUME_MIN = 0.1;
 export const VOLUME_MAX = 4;
 /** 智能音量（loudnorm）的目标响度，单位 LUFS。 */
@@ -413,7 +405,7 @@ export async function processAudioVolume(file, {
   });
 
   let res = await run();
-  // 原扩展名可能没有可用编码器（如 .amr/.silk 只读）→ 退回 wav 再试一次
+  // 原扩展名可能没有可用编码器（ffmpeg 没编进对应编码库时）→ 退回 wav 再试一次
   if ((res.error || res.code !== 0 || !fs.existsSync(outPath)) && ext && ext.toLowerCase() !== '.wav') {
     const wavPath = outPath.replace(/\.[^.]+$/, '.wav');
     const wavArgs = ['-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-af', filters.join(','), '-ac', '1', wavPath];

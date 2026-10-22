@@ -1,6 +1,6 @@
 // 仿真提示词改写（src/preset-prompt.js）的离线单测。
 // 这些检查保证「控制台改仿真提示词」不会破坏 YAML、不会丢别的条目、不会改变提示词语义。
-// 不连 DSH、不连 QQ、不写任何生产文件。
+// 不连 DSH、不连 Discord、不写任何生产文件。
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
@@ -16,18 +16,18 @@ import {
   renderPresetPromptYaml,
 } from '../src/preset-prompt.js';
 
-const PRESET_PATH = new URL('../dsh/agent-presets/qq-chat-v2/agent.cordis.yml', import.meta.url);
+const PRESET_PATH = new URL('../dsh/agent-presets/dc-chat-v2/agent.cordis.yml', import.meta.url);
 const source = fs.readFileSync(PRESET_PATH, 'utf8');
 const originalPrefix = extractPresetPrefix(source);
 
 // 回归：内置预设必须满足**它自己那一代**的硬性不变量。
 //
 // 背景：保存/还原的校验曾经对两代预设用同一份清单（那份清单是照二代写的），
-// 结果一代预设（qq-chat）在控制台里 100% 存不进去、也还原不了 ——
+// 结果一代预设（dc-chat）在控制台里 100% 存不进去、也还原不了 ——
 // 报错还说它「缺少安全不变量」，而它从来就没打算有那些工具面表述。
 // 这条测试同时钉住两件事：① 每代预设都能通过自己的清单；② 清单本身没写错字。
 test('每代内置预设都满足自己那一代的安全不变量', () => {
-  for (const [name, gen] of [['qq-chat', 'v1'], ['qq-chat-v2', 'v2']]) {
+  for (const [name, gen] of [['dc-chat', 'v1'], ['dc-chat-v2', 'v2']]) {
     const text = fs.readFileSync(new URL(`../dsh/agent-presets/${name}/agent.cordis.yml`, import.meta.url), 'utf8');
     const prefix = extractPresetPrefix(text);
     assert.equal(typeof prefix, 'string', `${name} 应能抽出 persona.prefix`);

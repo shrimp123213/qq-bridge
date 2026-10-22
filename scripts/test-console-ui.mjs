@@ -59,7 +59,7 @@ try {
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('dialog', dialog => dialog.accept());
   await page.goto(fixture.url);
-  await page.waitForFunction(() => document.getElementById('v2AgentPreset')?.value === 'qq-chat-v2' && document.getElementById('wlGroups')?.value.includes('123456789'));
+  await page.waitForFunction(() => document.getElementById('v2AgentPreset')?.value === 'dc-chat-v2' && document.getElementById('wlGroups')?.value.includes('123456789'));
 
   async function navigate(view) {
     if (original) return;
@@ -114,7 +114,7 @@ try {
     for (const [id, value] of Object.entries(drafts)) assert.equal(await (await reveal(`#${id}`)).inputValue(), value, `${id} lost its draft`);
     // Restore fixture defaults so the independent payload baseline remains deterministic.
     await page.reload();
-    await page.waitForFunction(() => document.getElementById('v2AgentPreset')?.value === 'qq-chat-v2');
+    await page.waitForFunction(() => document.getElementById('v2AgentPreset')?.value === 'dc-chat-v2');
   });
 
   await test('Mode and preset contracts', async () => {
@@ -122,8 +122,8 @@ try {
       assert.deepEqual(await clickWrite(`#modeRow [data-mode="${mode}"]`, '/api/mode'), { mode, closedAgentPreset: '' });
     }
     const select = await reveal('#closedPreset');
-    await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/mode') && r.request().method() === 'POST'), select.selectOption('qq-chat-v2')]);
-    assert.deepEqual(fixture.requests.at(-1).body, { mode: 'closed-agent', closedAgentPreset: 'qq-chat-v2' });
+    await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/mode') && r.request().method() === 'POST'), select.selectOption('dc-chat-v2')]);
+    assert.deepEqual(fixture.requests.at(-1).body, { mode: 'closed-agent', closedAgentPreset: 'dc-chat-v2' });
   });
 
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {
@@ -138,8 +138,8 @@ try {
   });
 
   await test('Whitelist numeric parsing and security contracts', async () => {
-    for (const [id, value] of Object.entries({ wlGroups: '123456789，100003', wlPrivate: '100001 100002', dnGroups: '800001,800002', dnPrivate: '900001', ownerQQ: '100001' })) await fill(id, value);
-    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { allow: { private: ['100001', '100002'], groups: ['123456789', '100003'] }, deny: { private: ['900001'], groups: ['800001', '800002'] }, ownerQQ: '100001' });
+    for (const [id, value] of Object.entries({ wlGroups: '123456789，100003', wlPrivate: '100001 100002', dnGroups: '800001,800002', dnPrivate: '900001', ownerId: '100001' })) await fill(id, value);
+    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { allow: { private: ['100001', '100002'], groups: ['123456789', '100003'] }, deny: { private: ['900001'], groups: ['800001', '800002'] }, ownerId: '100001' });
     await check('secInterceptNotify', false);
     assert.deepEqual(await clickWrite('#secSave', '/api/security'), { interceptNotify: false });
   });
@@ -500,14 +500,14 @@ try {
     await navigate('persona');
     await page.waitForFunction(() => document.getElementById('simPromptText').value.length > 0);
     const v2 = await page.locator('#simPromptText').inputValue();
-    assert.match(await page.locator('#simPromptStatus').textContent(), /二代仿真|qq-chat-v2/);
-    await page.locator('#simPromptPreset').selectOption('qq-chat');
+    assert.match(await page.locator('#simPromptStatus').textContent(), /二代仿真|dc-chat-v2/);
+    await page.locator('#simPromptPreset').selectOption('dc-chat');
     await page.waitForFunction((prev) => document.getElementById('simPromptText').value !== prev, v2);
     const v1 = await page.locator('#simPromptText').inputValue();
     assert.notEqual(v1, v2, '两代预设的提示词应各自独立');
-    assert.match(await page.locator('#simPromptStatus').textContent(), /一代仿真|qq-chat/);
+    assert.match(await page.locator('#simPromptStatus').textContent(), /一代仿真|dc-chat/);
     // 切回二代，避免影响后续断言
-    await page.locator('#simPromptPreset').selectOption('qq-chat-v2');
+    await page.locator('#simPromptPreset').selectOption('dc-chat-v2');
     await page.waitForFunction((prev) => document.getElementById('simPromptText').value === prev, v2);
   });
 

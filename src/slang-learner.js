@@ -4,14 +4,14 @@
 // - state/slang.json 的读写与 CRUD
 // - 从最近群聊消息中提取“疑似黑话”候选（DSH learner 会话）
 // - 对候选生成联网搜索确认提示词（DSH agent 可调用安全 Web Search MCP）
-// - 把已确认黑话格式化成注入给 QQ 聊天 agent 的“群聊黑话表”
+// - 把已确认黑话格式化成注入给聊天 agent 的“群聊黑话表”
 //
-// 按 qq-bridge 轻量化为 JSON 存储 + 控制台人工确认，不引入数据库。
+// 轻量化为 JSON 存储 + 控制台人工确认，不引入数据库。
 
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { truncateText } from './md-to-plain.js';
+import { truncateText } from './truncate-text.js';
 
 export const SLANG_STATUS = Object.freeze({
   CANDIDATE: 'candidate',
@@ -219,7 +219,7 @@ export function buildSlangContext(entries, max = 8) {
     .slice(0, Math.max(1, Math.min(30, Number(max) || 8)));
   if (!confirmed.length) return '';
   const lines = confirmed.map((e) => {
-    const clean = (s) => escapeLearnerText(String(s ?? '').replace(/\[CQ:/gi, '[CQ：'));
+    const clean = (s) => escapeLearnerText(String(s ?? ''));
     let line = `- ${clean(e.content)}：${clean(e.meaning)}`;
     if (e.usage) line += `（用法：${clean(e.usage)}）`;
     if (e.example) line += `（例：${clean(e.example)}）`;
@@ -309,7 +309,7 @@ export function extractJsonArray(text) {
   const MAX_CANDIDATES = 32;
   // 扫描尝试次数也必须设上限：candidates 只在**找到配对的 `]`** 时才增加，
   // 于是「一整篇都是 `[`」的文本会让外层对每个 `[` 都扫到串尾 —— O(n²)，
-  // 实测 10 万个 `[` 能卡住事件循环 10 秒以上（桥接的 QQ 收发与定时器都在同一个循环里）。
+  // 实测 10 万个 `[` 能卡住事件循环 10 秒以上（桥接的消息收发与定时器都在同一个循环里）。
   let attempts = 0;
   const MAX_SCAN_ATTEMPTS = 64;
   const candidates = [];

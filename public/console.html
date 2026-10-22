@@ -1880,8 +1880,8 @@ button:active:not(:disabled) {
       <div class="row" style="margin-bottom:8px">
         <label style="flex:0 0 auto">仿真代次</label>
         <select id="simPromptPreset" style="flex:0 1 280px">
-          <option value="qq-chat-v2">二代仿真（reserved2 · qq-chat-v2）</option>
-          <option value="qq-chat">一代仿真（reserved · qq-chat）</option>
+          <option value="dc-chat-v2">二代仿真（reserved2 · dc-chat-v2）</option>
+          <option value="dc-chat">一代仿真（reserved · dc-chat）</option>
         </select>
         <span class="meta">两代机制不同（一代空格分条 / 二代一切皆工具），提示词各自独立。</span>
       </div>
@@ -2004,7 +2004,7 @@ button:active:not(:disabled) {
 
       <div class="row" style="margin-top:10px">
         <label style="flex:1">启用二代模式</label><input type="checkbox" id="v2Enabled" style="width:auto">
-        <label style="flex:1">agentPreset</label><input type="text" id="v2AgentPreset" placeholder="qq-chat-v2" style="max-width:200px">
+        <label style="flex:1">agentPreset</label><input type="text" id="v2AgentPreset" placeholder="dc-chat-v2" style="max-width:200px">
       </div>
       <div class="row" style="margin-top:6px">
         <label style="flex:1">提供推荐值给 AI</label><input type="checkbox" id="v2ProvideRecommendations" style="width:auto">
@@ -2070,7 +2070,7 @@ button:active:not(:disabled) {
       <div id="voiceList" class="meta" style="margin-top:8px">点「刷新语音库」加载…</div>
       <div class="meta" style="margin-top:6px">
         上限：时长 <code>maxSeconds</code>、体积 <code>maxBytes</code>、频率 <code>maxPerMinute</code>/<code>maxPerHour</code>（见下方配置区）。
-        命令行等价工具：<code>node scripts/send-voice.mjs list-voice</code>（经桥接）或 <code>node voice-cli.mjs</code>（独立工具，在上级 <code>voice-tool/</code> 里直连 SnowLuma）。
+        命令行等价工具：<code>node scripts/send-voice.mjs list-voice</code>（经桥接）。
       </div>
 
       </div></details>
@@ -2404,7 +2404,7 @@ button:active:not(:disabled) {
           <label style="flex:1">注入最大条数</label><input type="number" id="slangInjectMax" min="1" max="30" style="width:90px">
         </div>
         <div class="row">
-          <label style="flex:1">学习会话 preset</label><input type="text" id="slangLearnerPreset" placeholder="qq-chat" style="width:120px">
+          <label style="flex:1">学习会话 preset</label><input type="text" id="slangLearnerPreset" placeholder="dc-chat" style="width:120px">
         </div>
         <div class="row">
           <label style="flex:1">学习工作区名</label><input type="text" id="slangWorkspaceTitle" placeholder="黑话学习" style="width:120px">
@@ -2441,8 +2441,8 @@ button:active:not(:disabled) {
       <input type="text" id="wlGroups" placeholder="123456789, 123456">
       <label>允许的私聊用户 id（逗号分隔）</label>
       <input type="text" id="wlPrivate" placeholder="123456789">
-      <label>管理员 id（ownerQQ，最高权限）</label>
-      <input type="text" id="ownerQQ" placeholder="123456789">
+      <label>管理员 id（ownerId，最高权限）</label>
+      <input type="text" id="ownerId" placeholder="123456789">
       <div class="meta">管理员是唯一可执行管理命令/审批/closed-agent 的用户；可留空清除（清除后无管理员，fail-closed）。</div>
       <label>拒绝的群 id（黑名单，逗号分隔）</label>
       <input type="text" id="dnGroups" placeholder="">
@@ -2923,7 +2923,7 @@ async function refreshRoles() {
 
 // ── 仿真提示词（预设内置，需重启 DSH 生效）──────────────────────────────────
 let simPromptOriginal = '';
-let simPromptPreset = 'qq-chat-v2';
+let simPromptPreset = 'dc-chat-v2';
 
 function setSimMsg(text, ok) {
   const el = document.getElementById('simPromptMsg');
@@ -2941,7 +2941,7 @@ function setSimEditing(editing) {
 }
 
 async function refreshSimPrompt() {
-  simPromptPreset = document.getElementById('simPromptPreset').value || 'qq-chat-v2';
+  simPromptPreset = document.getElementById('simPromptPreset').value || 'dc-chat-v2';
   setSimMsg('读取中…');
   try {
     const r = await api('/api/preset/sim-prompt?preset=' + encodeURIComponent(simPromptPreset));
@@ -3005,7 +3005,7 @@ async function refreshWhitelist() {
     const w = await api('/api/whitelist');
     document.getElementById('wlGroups').value = (w.allow.groups || []).join(', ');
     document.getElementById('wlPrivate').value = (w.allow.private || []).join(', ');
-    document.getElementById('ownerQQ').value = w.ownerQQ != null ? String(w.ownerQQ) : '';
+    document.getElementById('ownerId').value = w.ownerId != null ? String(w.ownerId) : '';
     document.getElementById('dnGroups').value = (w.deny.groups || []).join(', ');
     document.getElementById('dnPrivate').value = (w.deny.private || []).join(', ');
   } catch {}
@@ -3182,7 +3182,7 @@ document.getElementById('wlSave').addEventListener('click', async () => {
   const r = await api('/api/whitelist', 'POST', {
     allow: { private: parse(document.getElementById('wlPrivate').value), groups: parse(document.getElementById('wlGroups').value) },
     deny: { private: parse(document.getElementById('dnPrivate').value), groups: parse(document.getElementById('dnGroups').value) },
-    ownerQQ: document.getElementById('ownerQQ').value.trim()
+    ownerId: document.getElementById('ownerId').value.trim()
   });
   if (r.ok) { refreshWhitelist(); refresh(); alert('白名单已保存并生效'); }
   else alert(r.error || '保存失败');
@@ -3193,7 +3193,7 @@ document.getElementById('tsSend').addEventListener('click', async () => {
     id: document.getElementById('tsId').value.trim(),
     message: document.getElementById('tsMsg').value
   });
-  document.getElementById('tsMsg2').textContent = r.ok ? ('✅ 已发送 message_id=' + r.message_id) : ('❌ ' + (r.error || '失败'));
+  document.getElementById('tsMsg2').textContent = r.ok ? ('✅ 已发送 messageId=' + r.messageId) : ('❌ ' + (r.error || '失败'));
   document.getElementById('tsMsg2').className = r.ok ? 'meta ok' : 'meta err';
 });
 document.getElementById('restartBtn').addEventListener('click', async () => {
@@ -3794,7 +3794,7 @@ async function loadV2InitialPrompt() {
 }
 async function saveV2InitialPrompt() {
   const key = v2InitPromptKeyValue();
-  if (!key) { setV2InitPromptMsg('请输入会话 key（group:群id 或 private:用户id）', 'err'); return; }
+  if (!key) { setV2InitPromptMsg('请输入会话 key（group:频道id 或 private:用户id）', 'err'); return; }
   setV2InitPromptMsg('保存中…');
   try {
     const r = await api('/api/socialV2/initial-prompt', 'POST', { key, text: v2InitPromptTextEl.value });
@@ -4367,7 +4367,7 @@ function loadSlangConfig() {
     document.getElementById('slangCooldown').value = c.extractCooldownMs ?? 300000;
     document.getElementById('slangThresholds').value = (c.inferenceThresholds || [2, 4, 8]).join(', ');
     document.getElementById('slangInjectMax').value = c.injectMax ?? 8;
-    document.getElementById('slangLearnerPreset').value = c.learnerPreset || 'qq-chat';
+    document.getElementById('slangLearnerPreset').value = c.learnerPreset || 'dc-chat';
     document.getElementById('slangWorkspaceTitle').value = c.workspaceTitle || '黑话学习';
     document.getElementById('slangAutoResearch').checked = c.autoResearch !== false;
   }).catch(() => {});
@@ -4512,7 +4512,7 @@ function updateOverview(status, modeLabel) {
   renderSnowlumaHealth(status.snowluma);
   document.getElementById('metricMode').textContent = modeLabel.replace('模式', '');
   document.getElementById('metricRole').textContent = '角色 · ' + (status.role || '默认人格');
-  document.getElementById('accessSummary').textContent = '管理员 ' + (status.ownerQQ || '未设置') + ' · ' + (status.allowGroups || []).length + ' 个白名单群 · ' + (status.allowPrivate || []).length + ' 位白名单好友';
+  document.getElementById('accessSummary').textContent = '管理员 ' + (status.ownerId || '未设置') + ' · ' + (status.allowGroups || []).length + ' 个白名单群 · ' + (status.allowPrivate || []).length + ' 位白名单好友';
   document.getElementById('lastUpdated').textContent = '状态同步于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
   document.getElementById('connectionAlert').hidden = true;
   const silent = status.roleMode === 'silent';

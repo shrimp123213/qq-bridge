@@ -317,7 +317,7 @@ export class NodeApiClient extends AbstractApiClient {
     // 铸造 Cookie 的到期时刻；到期前主动重铸，避免先撞一次 401 再重试。
     this._cookieExpiresAt = 0;
     // 期望 follow 的会话集合：**跨重连保留**。DSH 重启或 WS 中断后必须重放，
-    // 否则已有会话再也收不到 session 事件（turn/end 丢失 → QQ 上永远没有回复，且无报错）。
+    // 否则已有会话再也收不到 session 事件（turn/end 丢失 → 聊天里永远没有回复，且无报错）。
     this._desiredFollows = new Set();
   }
 
@@ -765,7 +765,7 @@ export class NodeApiClient extends AbstractApiClient {
       socketOpen = true;
       this._muxSendOpen = sendOpen;
       // 重放**全部**期望 follow（跨重连保留），而不只是本次连接排队的那些。
-      // 少了这一步，DSH 一重启，所有已存在的 QQ 会话就会静默失联。
+      // 少了这一步，DSH 一重启，所有已存在的聊天会话就会静默失联。
       for (const sid of this._desiredFollows) sendOpen(sid);
       sendOpenEvents();
       if (!ended) onOpen?.();
@@ -834,7 +834,7 @@ export class NodeApiClient extends AbstractApiClient {
           // 打开/重连单会话流时的开场快照：带 projections（整条日志的权威 token 累计）
           // 与 records（最多 maxMessages 条历史事件）。
           // **单独一种帧类型**下发，绝不混进 session/event：快照里含历史 turn 的
-          // turn/end，若走事件通道会让桥接把「早已结束的回合」当成新的回合去发 QQ 回复。
+          // turn/end，若走事件通道会让桥接把「早已结束的回合」当成新的回合去发聊天回复。
           enqueue({
             kind: 'frame',
             envelope: {

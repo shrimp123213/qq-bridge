@@ -1,5 +1,5 @@
 // Offline integration tests. Every setup invocation receives its own repository and DSH_HOME.
-// QQ_BRIDGE_TEST_YAML_ROOT is only useful when auditing with an intentionally read-only
+// BRIDGE_TEST_YAML_ROOT is only useful when auditing with an intentionally read-only
 // node_modules tree; normal installs resolve the declared js-yaml dependency directly.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,9 +11,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const parserRoot = process.env.QQ_BRIDGE_TEST_YAML_ROOT || path.dirname(require.resolve('js-yaml/package.json'));
+const parserRoot = process.env.BRIDGE_TEST_YAML_ROOT || path.dirname(require.resolve('js-yaml/package.json'));
 const yaml = (await import(pathToFileURL(path.join(parserRoot, 'dist/js-yaml.mjs')).href)).default;
-const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-bridge-audit-setup-'));
+const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'discord-bridge-audit-setup-'));
 let failures = 0;
 
 function fixture(name, patch = '') {
@@ -35,7 +35,7 @@ function fixture(name, patch = '') {
     dsh: { profile: { bundles: ['existing'] } },
   }));
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
-  Object.assign(env, { PATH: path.dirname(process.execPath), DSH_HOME: home, HOME: home, USERPROFILE: home, QQ_BRIDGE_SKIP_DSH_INSTALL: '1' });
+  Object.assign(env, { PATH: path.dirname(process.execPath), DSH_HOME: home, HOME: home, USERPROFILE: home, BRIDGE_SKIP_DSH_INSTALL: '1' });
   const run = (profile = 'web', extraEnv = {}) => spawnSync(process.execPath, [path.join(repo, 'scripts/setup-dsh.mjs'), profile], {
     env: { ...env, ...extraEnv }, cwd: repo, encoding: 'utf8', timeout: 15000,
   });
@@ -49,7 +49,7 @@ function test(name, fn) {
 
 try {
   test('shared inserts, quoted IDs, flow YAML and unrelated nested arrays survive repeat setup', () => {
-    const source = `# user patch\n- insert:\n    - id: mcp-snowluma\n      name: old\n    - id: custom\n      name: custom-plugin\n      config:\n        empty:\n          []\n        nested:\n          - id: mcp-snowluma-host\n            value: keep\n- insert:\n    - id: 'mcp-snowluma-host' # previous setup\n      name: old\n- {insert: [{id: mcp-web-search-safe, name: old}]}\n`;
+    const source = `# user patch\n- insert:\n    - id: mcp-discord\n      name: old\n    - id: custom\n      name: custom-plugin\n      config:\n        empty:\n          []\n        nested:\n          - id: mcp-web-search-safe\n            value: keep\n- insert:\n    - id: 'mcp-discord' # previous setup\n      name: old\n- {insert: [{id: mcp-web-search-safe, name: old}]}\n`;
     const f = fixture('structured', source);
     const originalCustom = yaml.load(source)[0].insert[1];
     for (let i = 0; i < 2; i++) {
@@ -58,14 +58,14 @@ try {
       const doc = yaml.load(fs.readFileSync(f.patchFile, 'utf8'));
       const entries = doc.flatMap((op) => op.insert || []);
       assert.deepEqual(entries.find((entry) => entry.id === 'custom'), originalCustom);
-      for (const id of ['mcp-snowluma', 'mcp-snowluma-host', 'mcp-web-search-safe']) {
+      for (const id of ['mcp-discord', 'mcp-web-search-safe']) {
         assert.equal(entries.filter((entry) => entry.id === id).length, 1, `${id} duplicate`);
       }
-      assert.equal(entries.find((entry) => entry.id === 'mcp-snowluma').config.toolCallTimeoutMs, 725000);
+      assert.equal(entries.find((entry) => entry.id === 'mcp-discord').config.toolCallTimeoutMs, 725000);
     }
     const pkg = JSON.parse(fs.readFileSync(path.join(f.home, 'profiles/web/package.json')));
     assert.equal(pkg.dependencies.existing, '1.0.0');
-    assert.deepEqual(pkg.dsh.profile.bundles, ['existing', 'qq-mode-console', 'qq-agent-presets']);
+    assert.deepEqual(pkg.dsh.profile.bundles, ['existing', 'discord-mode-console', 'discord-agent-presets']);
   });
 
   test('legacy root [] is repaired without altering literal strings', () => {
@@ -101,10 +101,10 @@ try {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(fs.readFileSync(path.join(f.repo, 'state/mode.json'), 'utf8'), mode);
     const blocker = fixture('plugin-conflict', '[]\n');
-    fs.mkdirSync(path.join(blocker.home, 'plugins/qq-mode-console'), { recursive: true });
-    fs.writeFileSync(path.join(blocker.home, 'plugins/qq-mode-console/keep.txt'), 'keep');
+    fs.mkdirSync(path.join(blocker.home, 'plugins/discord-mode-console'), { recursive: true });
+    fs.writeFileSync(path.join(blocker.home, 'plugins/discord-mode-console/keep.txt'), 'keep');
     assert.notEqual(blocker.run().status, 0);
-    assert.equal(fs.readFileSync(path.join(blocker.home, 'plugins/qq-mode-console/keep.txt'), 'utf8'), 'keep');
+    assert.equal(fs.readFileSync(path.join(blocker.home, 'plugins/discord-mode-console/keep.txt'), 'utf8'), 'keep');
   });
 
   if (process.platform === 'win32') test('Windows runs the npm .cmd shim with literal profile arguments', () => {
@@ -113,12 +113,12 @@ try {
     fs.mkdirSync(bin);
     const capture = path.join(bin, 'called.json');
     const cli = path.join(bin, 'fake-dsh.mjs');
-    fs.writeFileSync(cli, `import fs from 'node:fs'; fs.writeFileSync(process.env.QQ_TEST_CAPTURE, JSON.stringify({args: process.argv.slice(2), home: process.env.DSH_HOME}));\n`);
+    fs.writeFileSync(cli, `import fs from 'node:fs'; fs.writeFileSync(process.env.BRIDGE_TEST_CAPTURE, JSON.stringify({args: process.argv.slice(2), home: process.env.DSH_HOME}));\n`);
     fs.writeFileSync(path.join(bin, 'dsh.cmd'), `@echo off\r\n"${process.execPath}" "${cli}" %*\r\n`);
     const profile = 'test&name%CD%!';
     const result = f.run(profile, {
       PATH: [bin, path.dirname(process.execPath)].join(path.delimiter),
-      QQ_BRIDGE_SKIP_DSH_INSTALL: '0', QQ_TEST_CAPTURE: capture,
+      BRIDGE_SKIP_DSH_INSTALL: '0', BRIDGE_TEST_CAPTURE: capture,
     });
     assert.equal(result.status, 0, result.stderr);
     assert.ok(fs.existsSync(capture), `CLI was not invoked: ${result.stdout}`);

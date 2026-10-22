@@ -5,7 +5,7 @@
 // DSH 的 `web_search` 工具背后是 `@deepseek-ai/dsh-web-search-deepseek`：
 // 向 DeepSeek 的 Anthropic 兼容 Messages 端点发一次带 `web_search_20250305`
 // 服务端工具的请求，从 `web_search_tool_result` 里取结构化结果。本模块照同一
-// 端点/模型/工具参数实现一份最小客户端，于是 QQ 里的 AI 和 DSH 里的 AI 拿到的是
+// 端点/模型/工具参数实现一份最小客户端，于是 Discord 里的 AI 和 DSH 里的 AI 拿到的是
 // **同一路搜索结果**；搜索词只发给 DeepSeek（也就是本来就在处理这段对话的同一家），
 // 不再把群聊里提炼出来的词发给 Bing。
 //
@@ -314,7 +314,7 @@ export async function deepseekSearch(query, config = defaultConfig) {
       'anthropic-version': DEFAULT_API_VERSION,
       'content-type': 'application/json',
       accept: 'application/json',
-      'user-agent': 'qq-bridge-web-search/0.2.0'
+      'user-agent': 'discord-bridge-web-search/0.2.0'
     },
     body,
     timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS

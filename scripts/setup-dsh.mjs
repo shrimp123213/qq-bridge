@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// setup-dsh.mjs — 在目标设备上安装 qq-bridge 的 DSH 端配置
+// setup-dsh.mjs — 在目标设备上安装 discord-bridge 的 DSH 端配置
 //
 // 功能：
-//   1. 安装两套 agent preset：qq-chat、qq-chat-v2
-//      （DSH 0.1.7 机制：作为 qq-agent-presets bundle 的 patch 层插入
+//   1. 安装两套 agent preset：dc-chat、dc-chat-v2
+//      （DSH 0.1.7 机制：作为 discord-agent-presets bundle 的 patch 层插入
 //        @deepseek-ai/dsh-agent-preset 行；~/.dsh/.agent-presets/ 目录已不再被读取）
-//   2. 在 DSH profile 的 cordis.patch.yml 中挂载三个 MCP server：
-//      mcp-snowluma / mcp-snowluma-host / mcp-web-search-safe
-//   3. 在 profile package.json 中注册两个 bundle：qq-mode-console、qq-agent-presets
+//   2. 在 DSH profile 的 cordis.patch.yml 中挂载两个 MCP server：
+//      mcp-discord / mcp-web-search-safe
+//   3. 在 profile package.json 中注册两个 bundle：discord-mode-console、discord-agent-presets
 //
 // 用法：
 //   node scripts/setup-dsh.mjs [profile]
@@ -19,7 +19,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
-import { ALL_PRESETS, BUNDLE_DIR, PRESETS, buildPatches, patchFileFor } from './build-agent-preset-patches.mjs';
+import { BUNDLE_DIR, PRESETS, buildPatches, patchFileFor } from './build-agent-preset-patches.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -80,10 +80,10 @@ function backupBeforeOverwrite(file, keep = 5) {
 // 0.1.7：注册表既不扫目录也不接受 preset 路径；preset 是一条普通 loader 行
 //        （@deepseek-ai/dsh-agent-preset，config.plugins 内联子行列表），
 //        由 bundle 的 patch 文件插入。因此这里做两件事：
-//          ① 把 qq-agent-presets bundle 注册进 profile（link: 依赖 + bundles + junction）；
+//          ① 把 discord-agent-presets bundle 注册进 profile（link: 依赖 + bundles + junction）；
 //          ② 从仓库权威源（dsh/agent-presets/<preset>/）重新生成 patch 文件。
 //        旧目录不再写入、也不删除（见 reportLegacyPresetDir）。
-const BUNDLE_NAMES = ['qq-mode-console', 'qq-agent-presets'];
+const BUNDLE_NAMES = ['discord-mode-console', 'discord-agent-presets'];
 
 /** 从仓库源重新生成 bundle 里的 patch 文件（人格正文/工具面改了就必须重跑）。 */
 function regeneratePresetPatches() {
@@ -91,7 +91,7 @@ function regeneratePresetPatches() {
   for (const { file, changed } of results) {
     log(`preset patch ${changed ? '已生成' : '已是最新'}: ${path.relative(REPO_ROOT, file)}`);
   }
-  for (const name of ALL_PRESETS) {
+  for (const name of PRESETS) {
     const file = patchFileFor(name);
     if (!fs.existsSync(file)) fatal(`preset patch 未生成：${file}`);
   }
@@ -122,17 +122,16 @@ function yamlSingleQuote(s) {
   return `'${String(s).replace(/'/g, "''")}'`;
 }
 
-// 由桥接托管的 MCP 条目 id：脚本对这三个 id 拥有所有权，可安全地按 id 增删。
-const MANAGED_MCP_IDS = ['mcp-snowluma', 'mcp-snowluma-host', 'mcp-web-search-safe'];
+// 由桥接托管的 MCP 条目 id：脚本对这两个 id 拥有所有权，可安全地按 id 增删。
+const MANAGED_MCP_IDS = ['mcp-discord', 'mcp-web-search-safe'];
 
 function mcpEntries() {
   const node = process.execPath;
   const servers = {
-    'mcp-snowluma': { serverName: 'snowluma', script: path.join(REPO_ROOT, 'src', 'mcp-snowluma-safe.js'), toolCallTimeoutMs: 725000 },
-    'mcp-snowluma-host': { serverName: 'snowluma-host', script: path.join(REPO_ROOT, 'src', 'mcp-host-server.js') },
+    'mcp-discord': { serverName: 'discord', script: path.join(REPO_ROOT, 'src', 'mcp-discord-safe.js'), toolCallTimeoutMs: 725000 },
     'mcp-web-search-safe': { serverName: 'web-search-safe', script: path.join(REPO_ROOT, 'src', 'mcp-web-search-safe.js') },
   };
-  let out = '# === qq-bridge MCP BEGIN ===\n';
+  let out = '# === discord-bridge MCP BEGIN ===\n';
   out += '# 由 scripts/setup-dsh.mjs 维护；这段区块会被整体替换，请勿手工编辑内部条目。\n';
   for (const [id, s] of Object.entries(servers)) {
     out += `- insert:\n`;
@@ -147,7 +146,7 @@ function mcpEntries() {
     // chat_wait_for_messages 最长可等 10 分钟；DSH 默认 60s 会提前掐断工具调用。
     if (s.toolCallTimeoutMs) out += `        toolCallTimeoutMs: ${s.toolCallTimeoutMs}\n`;
   }
-  out += '# === qq-bridge MCP END ===\n';
+  out += '# === discord-bridge MCP END ===\n';
   return out;
 }
 
@@ -260,10 +259,10 @@ function ensureDirLink(linkPath, targetDir, label) {
  *   ~/.dsh/plugins/<name>  → 仓库目录（人工可读的"安装位"）
  *   <profile>/node_modules/<name> → ~/.dsh/plugins/<name>（Node 解析路径）
  * 第二层必须自己建：preset 子行按 profile 目录解析裸说明符
- * （qq-agent-presets/qq-tool-restrict.mjs），缺了它 preset 会整条挂载失败。
+ * （discord-agent-presets/discord-tool-restrict.mjs），缺了它 preset 会整条挂载失败。
  */
 function ensureBundle(name) {
-  const repoDir = name === 'qq-agent-presets' ? BUNDLE_DIR : path.join(REPO_ROOT, 'plugins', name);
+  const repoDir = name === 'discord-agent-presets' ? BUNDLE_DIR : path.join(REPO_ROOT, 'plugins', name);
   const linkDir = ensureDirLink(path.join(DSH_HOME, 'plugins', name), repoDir, `bundle ${name} link`);
   ensureDirLink(path.join(DSH_HOME, 'profiles', PROFILE, 'node_modules', name), linkDir, `bundle ${name} node_modules link`);
   return linkDir;
@@ -316,12 +315,12 @@ function ensureLocalModeFile() {
   log(`state/mode.json created with mode=reserved2 (fallback if DSH settings are not available)`);
 }
 
-// qq-mode-console / qq-agent-presets 以 link: 依赖注册进 profile package.json 后，DSH 首次启动
+// discord-mode-console / discord-agent-presets 以 link: 依赖注册进 profile package.json 后，DSH 首次启动
 // 需要先安装一次才能解析这些 bundle（否则 cold start 报 "cannot resolve profile bundle"）。
 // dsh CLI 可用时自动执行。
 function autoInstallProfileBundles() {
-  if (process.env.QQ_BRIDGE_SKIP_DSH_INSTALL === '1') {
-    log('auto-install skipped: QQ_BRIDGE_SKIP_DSH_INSTALL=1');
+  if (process.env.BRIDGE_SKIP_DSH_INSTALL === '1') {
+    log('auto-install skipped: BRIDGE_SKIP_DSH_INSTALL=1');
     return;
   }
   const windows = process.platform === 'win32';
@@ -330,14 +329,14 @@ function autoInstallProfileBundles() {
   // environment expansion, with delayed expansion disabled to preserve '!'.
   const cmd = windows ? (process.env.ComSpec || 'cmd.exe') : 'dsh';
   const args = windows
-    ? ['/d', '/v:off', '/s', '/c', 'dsh.cmd plugin --profile "%QQ_BRIDGE_SETUP_PROFILE%" install']
+    ? ['/d', '/v:off', '/s', '/c', 'dsh.cmd plugin --profile "%BRIDGE_SETUP_PROFILE%" install']
     : ['plugin', '--profile', PROFILE, 'install'];
   const r = spawnSync(cmd, args, {
     encoding: 'utf8',
     timeout: 120000,
     windowsHide: true,
     windowsVerbatimArguments: windows,
-    ...(windows ? { env: { ...process.env, QQ_BRIDGE_SETUP_PROFILE: PROFILE } } : {}),
+    ...(windows ? { env: { ...process.env, BRIDGE_SETUP_PROFILE: PROFILE } } : {}),
   });
   if (r.error) {
     log(`auto-install failed to start/complete（${r.error.code || r.error.message}）。`);

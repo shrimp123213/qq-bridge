@@ -5,7 +5,7 @@
 //       同进程内 describe().value 不更新；读取必须 user 优先、value 回退。
 //   #11/#19/#23/#26 回合结束信号丢了 → 会话永久 busy —— 回合判忙改为「起始时间 + 15 分钟租约」，
 //       无起始时间的残留 collector 不再判忙；collector 保留，迟到回复照常 flush。
-//   #29 被 @ 了不理人 —— 机器人昵称/QQ 号必须写进唤醒 prompt（否则 agent 把 @自己 当 @别人）。
+//   #29 被 @ 了不理人 —— 机器人昵称/用户 id 必须写进唤醒 prompt（否则 agent 把 @自己 当 @别人）。
 import assert from 'node:assert/strict';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
@@ -25,7 +25,7 @@ await test('#22 settingFromDshNamespace：user 层优先、value 回退', async 
     assert.equal(f({ value: { mode: 'reserved2' }, user: { mode: 'chat' } }, 'mode'), 'chat', 'user 层必须优先');
     assert.equal(f({ value: { mode: 'reserved2' }, user: {} }, 'mode'), 'reserved2', 'user 为空时回退 value');
     assert.equal(f({ value: { mode: 'reserved2' } }, 'mode'), 'reserved2', '没有 user 键时回退 value');
-    assert.equal(f({ user: { ownerQQ: '' }, value: { ownerQQ: '123' } }, 'ownerQQ'), '', '空串也是显式值');
+    assert.equal(f({ user: { ownerId: '' }, value: { ownerId: '123' } }, 'ownerId'), '', '空串也是显式值');
     assert.equal(f(undefined, 'mode'), undefined);
     assert.equal(f({ value: null }, 'mode'), undefined);
   } finally { await h.close(); }
@@ -37,7 +37,7 @@ await test('#22 refreshMode 采纳控制台刚写入的 user 层（否则 5 秒�
     h.api.settings.describe = async () => ({
       result: { ok: true, value: {
         namespaces: [
-          { ns: 'qq-mode', value: { mode: 'reserved2', ownerQQ: '10001' }, user: { mode: 'chat' } }
+          { ns: 'discord-mode', value: { mode: 'reserved2', ownerId: '10001' }, user: { mode: 'chat' } }
         ]
       } }
     });
@@ -46,24 +46,24 @@ await test('#22 refreshMode 采纳控制台刚写入的 user 层（否则 5 秒�
 
     // 老行为兜底：从没在控制台写过（user 为空）时仍读 value。
     h.api.settings.describe = async () => ({
-      result: { ok: true, value: { namespaces: [{ ns: 'qq-mode', value: { mode: 'reserved' }, user: {} }] } }
+      result: { ok: true, value: { namespaces: [{ ns: 'discord-mode', value: { mode: 'reserved' }, user: {} }] } }
     });
     await h.refreshMode();
     assert.equal(h.getMode(), 'reserved');
 
-    // ownerQQ：user 层空串表示「不覆盖 config.json」。
-    h.cfg.ownerQQ = 20002;
+    // ownerId：user 层空串表示「不覆盖 config.json」。
+    h.cfg.ownerId = 20002;
     h.api.settings.describe = async () => ({
-      result: { ok: true, value: { namespaces: [{ ns: 'qq-mode', value: { mode: 'chat', ownerQQ: 30003 }, user: { ownerQQ: '' } }] } }
+      result: { ok: true, value: { namespaces: [{ ns: 'discord-mode', value: { mode: 'chat', ownerId: 30003 }, user: { ownerId: '' } }] } }
     });
     await h.refreshMode();
-    assert.equal(h.cfg.ownerQQ, 20002, 'user 层空串不得把 config.json 的 ownerQQ 抹掉');
+    assert.equal(h.cfg.ownerId, 20002, 'user 层空串不得把 config.json 的 ownerId 抹掉');
 
     h.api.settings.describe = async () => ({
-      result: { ok: true, value: { namespaces: [{ ns: 'qq-mode', value: { mode: 'chat' }, user: { ownerQQ: '40004' } }] } }
+      result: { ok: true, value: { namespaces: [{ ns: 'discord-mode', value: { mode: 'chat' }, user: { ownerId: '40004' } }] } }
     });
     await h.refreshMode();
-    assert.equal(h.cfg.ownerQQ, '40004', 'user 层显式 ownerQQ 必须生效');
+    assert.equal(h.cfg.ownerId, '40004', 'user 层显式 ownerId 必须生效');
   } finally { await h.close(); }
 });
 
@@ -96,7 +96,7 @@ await test('#11/#19 回合判忙：无起始时间的残留 collector 不再永�
   } finally { await h.close(); }
 });
 
-await test('#29 唤醒 prompt 必须写明机器人自己的昵称与 QQ 号', async () => {
+await test('#29 唤醒 prompt 必须写明机器人自己的昵称与用户 id', async () => {
   const h = await bridgeHarness();
   try {
     h.setSelfIdentity('樰', '10001');

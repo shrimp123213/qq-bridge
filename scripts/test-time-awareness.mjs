@@ -9,7 +9,7 @@
 // 本文件验证修复后的契约：at/ago 字段、提示词里的时间感分档、唤醒原因的年龄、���照头的时间。
 import assert from 'node:assert/strict';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
-import { compactModelMessage, compactModelData, describeAge, serializeModelData } from '../src/qq-model-view.js';
+import { compactModelMessage, compactModelData, describeAge, serializeModelData } from '../src/model-view.js';
 
 const KEY = 'group:456';
 const MIN = 60000;
@@ -167,7 +167,7 @@ await test('快照头部带 now 与 newestAgo，消息体带 at/ago 且不再有
   });
 });
 
-// ── 4. 工具结果也走同一套视图（MCP 与桥接共用 qq-model-view） ───────────────
+// ── 4. 工具结果也走同一套视图（MCP 与桥接共用 model-view） ───────────────
 await test('serializeModelData 对 messages/newMessages 同时生效（工具结果同口径）', () => {
   const data = { ok: true, unreadCount: 1, messages: [{ seq: 3, text: 'x', time: NOW - 90 * 1000 }], newMessages: [{ seq: 4, text: 'y', time: NOW - 5 * MIN }] };
   const out = JSON.parse(serializeModelData(data, { now: NOW }));
