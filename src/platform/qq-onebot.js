@@ -21,13 +21,18 @@
 //     poke(kind, id, userId)      拍一拍
 //   查询
 //     getSelfInfo()               机器人自己：{ userId, nickname }（userId 可能为 null）
-//     getMessage(messageId)       按 id 读回一条消息：InboundMessage 或 null（引用解析用）
+//     getMessage(messageId, { kind, conversationId })
+//                                 按 id 读回一条消息：InboundMessage 或 null（引用解析用）；
+//                                 会话给「消息 id 只在频道内有效」的平台用（Discord），QQ 忽略
 //     getImage(file)  getFace(faceId)  getForwardMessage(id)
 //     getGroupMemberList(groupId)  getGroupMemberInfo(groupId, userId)
 //     getGroupMemberListWithFallback(groupId)   WS 失败时改走 HTTP；返回网关响应信封
 //     confirmVoiceSent(messageId)  voiceToText(messageId)
 //   收藏表情（QQ 独有；其它平台可以直接抛「不支持」）
 //     fetchStickerLibrary(count)  addSticker(image)  setStickerRemark(emojiId, desc)
+//
+//   平台做不到的功能登记在 ./capabilities.js：对应的二代工具不注册、桥接也当作关闭，
+//   适配层里那几个方法抛「不支持」即可，不会被正常流程调到。
 //
 // 入站格式（所有 id 都是字符串）：
 //

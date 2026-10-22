@@ -5,6 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { test } from 'node:test';
 import { z } from 'zod';
+import * as capabilities from '../src/platform/capabilities.js';
 
 function loadWebTools({ safeFetch, webSearch }) {
   const tools = new Map();
@@ -123,6 +124,7 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null, fix
     fs: modeAwareFs,
     SENSITIVE_RE: { test: () => false },
     serializeModelData: (value) => JSON.stringify(value),
+    ...capabilities,
   });
   const callTool = async (name, arguments_ = {}) => {
     const tool = tools.get(name);

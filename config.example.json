@@ -21,6 +21,11 @@
     "launcherPath": "",
     "homeDir": ""
   },
+  "platform": "qq",
+  "discord": {
+    "token": "",
+    "guildMembersIntent": false
+  },
   "ownerQQ": null,
   "sessionCwd": "",
   "agentPreset": "qq-chat",

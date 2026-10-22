@@ -18,6 +18,7 @@ import { extractPresetPrefix, presetPromptBlockers, presetPromptWarnings, render
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
 import { createQQPlatform } from './platform/qq-onebot.js';
+import { PLATFORMS, platformOf, platformSupportsToolFlag, platformHasStickerLibrary } from './platform/capabilities.js';
 import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from './dsh-client.js';
 import { mdToPlain, splitForQQ, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
@@ -691,7 +692,10 @@ function loadConfig() {
       allowRemote: false,
       ...(file.dsh ?? {})
     },
+    // 聊天平台：qq（SnowLuma / OneBot v11，默认）或 discord
+    platform: platformOf(file),
     snowluma: { wsUrl: 'ws://127.0.0.1:3001', accessToken: '', ...(file.snowluma ?? {}) },
+    discord: { token: '', guildMembersIntent: false, ...(file.discord ?? {}) },
     // 空 => 每个会话在 state/agents/<key> 下建独立工作目录
     sessionCwd: file.sessionCwd ?? '',
     agentPreset: file.agentPreset ?? 'qq-chat',
@@ -1407,8 +1411,14 @@ async function main() {
   acquireLock();
   loadState();
 
-  // 聊天平台（QQ / SnowLuma）适配层：所有收发与查询都经它，start() 在 main() 末尾才连接。
-  const platform = createQQPlatform({ cfg, log, configPath: path.join(ROOT, 'config.json') });
+  // 聊天平台适配层：所有收发与查询都经它，start() 在 main() 末尾才连接。
+  // Discord 适配层按需加载：只跑 QQ 的部署不需要装 discord.js 也能启动。
+  if (!PLATFORMS.includes(cfg.platform)) {
+    throw new Error(`config.json 的 platform 只能是 ${PLATFORMS.join(' / ')}（读到的是 ${cfg.platform}）`);
+  }
+  const platform = cfg.platform === 'discord'
+    ? (await import('./platform/discord.js')).createDiscordPlatform({ cfg, log })
+    : createQQPlatform({ cfg, log, configPath: path.join(ROOT, 'config.json') });
 
   // ── 群聊黑话/网络用语学习（slang） ──────────────────────────────────────
   let slangEntries = [];
@@ -1447,8 +1457,9 @@ async function main() {
   let stickerSyncedAt = 0; // 上次从 SnowLuma 拉取收藏表情的时间戳（毫秒）
   let lastForcedAgentStickerSync = 0; // AI 强制刷新表情库的最小间隔保护
 
+  // 收藏表情库是 QQ 账号自带的；没有这个库的平台整套表情体系都当作关闭。
   function stickerEnabled() {
-    return cfg.socialV2?.sticker?.enabled !== false;
+    return cfg.socialV2?.sticker?.enabled !== false && platformHasStickerLibrary(cfg.platform);
   }
 
   function saveStickerStoreSafe() {
@@ -1460,7 +1471,7 @@ async function main() {
   // WS 失败时改走 OneBot HTTP 的兜底在适配层里（platform.fetchStickerLibrary）。
   // force=true 时忽略 TTL 强制刷新；失败时返回 null（调用方决定是否使用缓存）。
   async function syncStickerLibrary(force = false) {
-    if (cfg.socialV2?.sticker?.enabled === false) return null;
+    if (!stickerEnabled()) return null;
     const rawTtl = Number(cfg.socialV2?.sticker?.syncTtlMs);
     const ttl = Number.isFinite(rawTtl) ? Math.max(0, rawTtl) : 60000;
     const now = Date.now();
@@ -2862,8 +2873,9 @@ async function main() {
 
   // ── 本地控制台（独立 Web 面板，不依赖 DSH WebUI） ───────────────────────────
   // 模式/角色/静默状态都存 state/*.json，桥接即时感知；此服务只读写这些文件。
+  // 平台做不到的工具（Discord 的拍一拍、收藏表情…）一律当作关闭，见 platform/capabilities.js。
   function v2ToolEnabled(flag) {
-    return cfg.socialV2?.tools?.[flag] !== false;
+    return cfg.socialV2?.tools?.[flag] !== false && platformSupportsToolFlag(cfg.platform, flag);
   }
 
   function startConsoleServer() {
@@ -4400,7 +4412,7 @@ async function main() {
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getPrompt')) { sendJson({ ok: false, error: '工具未启用：chat_get_prompt' }, 403); return; }
           const st = getSocialV2State(key);
           // 让 prompt 里的表情摘要尽量新鲜：按 TTL 同步一次 QQ 收藏表情（失败不阻塞）。
-          if (cfg.socialV2?.sticker?.enabled !== false) {
+          if (stickerEnabled()) {
             try { await syncStickerLibrary(false); } catch {}
           }
           const roleState = readRoleState();
@@ -4436,11 +4448,10 @@ async function main() {
             getSelfImage: 'chat_get_self_image',
             sendVoice: 'chat_send_voice / chat_list_voices'
           };
-          const tools = cfg.socialV2?.tools ?? {};
-          const stickerToolFlags = new Set(['listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker']);
+          const stickerToolFlags =new Set(['listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker']);
           const enabledTools = [];
           for (const [flag, name] of Object.entries(toolMap)) {
-            if (tools[flag] !== false && !(stickerToolFlags.has(flag) && !stickerEnabled())) enabledTools.push(name);
+            if (v2ToolEnabled(flag) && !(stickerToolFlags.has(flag) && !stickerEnabled())) enabledTools.push(name);
           }
           sendJson({
             ok: true,
@@ -4473,10 +4484,11 @@ async function main() {
               block: buildSlangContext(slangEntries, cfg.slang?.injectMax ?? 8)
             },
             stickers: {
-              enabled: cfg.socialV2?.sticker?.enabled !== false,
+              enabled: stickerEnabled(),
               total: stickerEntries.length,
-              context: cfg.socialV2?.sticker?.includeInPrompt !== false ? buildStickerContext(stickerEntries, cfg.socialV2?.sticker?.promptMaxStickers ?? 8) : '',
-              strategy: cfg.socialV2?.sticker?.includeInPrompt !== false ? buildStickerStrategyHint() : ''
+              // 没有收藏表情库的平台不给表情策略：那些工具根本没注册
+              context: platformHasStickerLibrary(cfg.platform) && cfg.socialV2?.sticker?.includeInPrompt !== false ? buildStickerContext(stickerEntries, cfg.socialV2?.sticker?.promptMaxStickers ?? 8) : '',
+              strategy: platformHasStickerLibrary(cfg.platform) && cfg.socialV2?.sticker?.includeInPrompt !== false ? buildStickerStrategyHint() : ''
             },
             // 语音库摘要：让 AI 一开始就知道有哪些语音可发（真发之前用 chat_list_voices 看详情）。
             voices: cfg.socialV2?.voice?.enabled === false ? { enabled: false } : {
@@ -9392,7 +9404,8 @@ async function main() {
     if (hit && Date.now() - hit.ts < (hit.info ? REPLY_INFO_TTL_MS : REPLY_NEGATIVE_TTL_MS)) return hit.info;
     try {
       // 消息 id 原样（字符串）交给平台：id 格式是平台的事（QQ 的校验见 platform.getMessage）。
-      const quoted = await platform.getMessage(String(messageId));
+      // 带上会话：Discord 的消息只能在所属频道里读。归属校验仍在下面做，不信任平台。
+      const quoted = await platform.getMessage(String(messageId), { kind, conversationId: String(convId) });
       if (!quoted) {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
@@ -10006,7 +10019,7 @@ async function main() {
     const participationLine = participationText ? `${participationText}\n\n` : '';
     const antiAiLine = '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。\n\n';
     const stickerCfg = cfg.socialV2?.sticker ?? {};
-    const stickerLine = stickerCfg.enabled !== false && stickerCfg.includeInPrompt !== false
+    const stickerLine = stickerEnabled() && stickerCfg.includeInPrompt !== false
       ? `${buildStickerStrategyHint()}\n${buildStickerContext(stickerEntries, stickerCfg.promptMaxStickers ?? 8)}\n\n`
       : '';
     const preSleepMs = Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000);
@@ -11512,7 +11525,7 @@ async function main() {
   platform.start();
   log('桥接已启动。按 Ctrl+C 退出。');
   // 预热表情库：启动时同步一次 QQ 收藏表情，失败不阻塞（AI 首次调用工具时还会再试）。
-  if (cfg.socialV2?.sticker?.enabled !== false) {
+  if (stickerEnabled()) {
     syncStickerLibrary(true).catch((error) => log('启动预热表情库失败:', error?.message ?? error));
   }
   startDshWatch();

@@ -19,6 +19,7 @@ import { z } from 'zod';
 // 在 MCP 里拦会连「安全拒绝理由」都拿不到，反而让模型无法把话说清楚。
 import { SENSITIVE_RE } from './sensitive.js';
 import { serializeModelData } from './qq-model-view.js';
+import { platformOf, platformSupportsTool, platformSupportsToolFlag } from './platform/capabilities.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -347,12 +348,19 @@ const TOOL_CONFIG_FLAGS = {
   chat_set_sticker_remark: 'setStickerRemark',
 };
 const disabledTools = [];
+// 平台做不到的工具（Discord 的拍一拍、收藏表情、直连 OneBot 的旧工具…）同样不注册，
+// 能力表与桥接共用 platform/capabilities.js。
+const chatPlatform = platformOf(cfg);
 {
   const registerTool = server.tool.bind(server);
   server.tool = (name, ...rest) => {
     const flag = TOOL_CONFIG_FLAGS[name];
     if (flag && cfg.socialV2?.tools?.[flag] === false) {
       disabledTools.push(`${name}(${flag})`);
+      return undefined;
+    }
+    if ((flag && !platformSupportsToolFlag(chatPlatform, flag)) || !platformSupportsTool(chatPlatform, name)) {
+      disabledTools.push(`${name}(${chatPlatform} 不支持)`);
       return undefined;
     }
     return registerTool(name, ...rest);
