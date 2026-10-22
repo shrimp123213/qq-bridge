@@ -41,7 +41,7 @@ test('local/admin tool restrictions and existing compaction budgets stay intact'
 test('snapshots are optional, partial snapshots require reading, and watermarks are not message IDs', () => {
   assert.match(prefix, /可能附带【本次消息快照】/);
   assert.match(prefix, /partial=true[^。]*继续读取/);
-  assert.match(prefix, /readThroughSeq 是桥接本地的 seq，不是 QQ messageId/);
+  assert.match(prefix, /readThroughSeq 是桥接本地的 seq，不是平台的 messageId/);
   assert.match(prefix, /没有水位[^。]*省略 throughSeq/);
   assert.match(prefix, /首次进入会话、角色变化[^。]*chat_get_prompt/);
 });
@@ -73,7 +73,7 @@ test('social autonomy and visual, forwarding, sticker and web capabilities remai
   for (const text of [
     '【反 AI 味：拒绝有求必应】', '【保持主体性】', '【学习群友策略】',
     '【不要当群管家/主持人】', '普通对话默认 1 条，最多 2 条', '不要用空格断句',
-    '不会自动发送到 QQ', 'chat_get_message_images', 'chat_get_forward_msg', 'nestedForwardIds',
+    '不会自动发送到聊天', 'chat_get_message_images', 'chat_get_forward_msg', 'nestedForwardIds',
     'chat_send_poke', 'chat_list_stickers', 'chat_get_sticker_image', 'chat_send_sticker',
     'chat_collect_sticker', 'chat_sticker_note', 'chat_get_self_image',
     'chat_set_sticker_remark', '只有管理端明确开启后才能用',

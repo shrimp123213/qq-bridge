@@ -225,7 +225,7 @@ export async function inspectAudio(file, {
   if (p.duration > maxSeconds) {
     return { ok: false, size: st.size, duration: p.duration, codec: p.codec, error: `时长 ${formatDuration(p.duration)} 超过上限 ${formatDuration(maxSeconds)}` };
   }
-  if (p.duration > 60) warnings.push(`时长 ${formatDuration(p.duration)} 较长，QQ 会显示为长语音`);
+  if (p.duration > 60) warnings.push(`时长 ${formatDuration(p.duration)} 较长，可能会显示为长语音`);
   if (!p.codec) warnings.push('没找到音频流，网关转码可能失败');
   return {
     ok: true, size: st.size, duration: p.duration, codec: p.codec,

@@ -27,7 +27,7 @@ export const PRESET_BLOCKING_SUBSTRINGS = [
   '群友没有管理权限',
   'API 令牌',
   '角色由桥接注入',
-  '不会自动发送到 QQ',
+  '不会自动发送到',
 ];
 // 一代（qq-chat）：不用 MCP 工具，靠空格分句 + [SILENT]，因此工具面那几条不适用。
 // 这三条都逐字出现在一代预设的正文里（见 dsh/agent-presets/qq-chat/agent.cordis.yml）——

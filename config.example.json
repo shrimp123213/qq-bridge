@@ -29,7 +29,7 @@
   "ownerQQ": null,
   "sessionCwd": "",
   "agentPreset": "qq-chat",
-  "workspaceTitle": "QQ 聊天",
+  "workspaceTitle": "聊天",
   "allow": {
     "private": [],
     "groups": []
@@ -70,7 +70,7 @@
     ],
     "injectMax": 8,
     "learnerPreset": "qq-chat",
-    "workspaceTitle": "QQ 黑话学习",
+    "workspaceTitle": "黑话学习",
     "autoResearch": true
   },
   "social": {

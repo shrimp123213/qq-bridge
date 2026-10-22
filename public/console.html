@@ -1777,7 +1777,7 @@ button:active:not(:disabled) {
       <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true">⌘</span>调试与运维</button>
       <button data-view="reference" class="nav-item"><span class="nav-icon" aria-hidden="true">ⓘ</span>工具参考</button>
     </nav>
-    <div class="sidebar-bottom"><span class="local-dot"></span>本地控制台<small>QQ ↔ DeepSeek Harness</small></div>
+    <div class="sidebar-bottom"><span class="local-dot"></span>本地控制台<small>聊天平台 ↔ DeepSeek Harness</small></div>
   </aside>
   <div class="workspace">
     <header class="topbar">
@@ -1785,7 +1785,7 @@ button:active:not(:disabled) {
       <div class="topbar-actions"><span class="status-badge" id="statusText" role="status">正在连接…</span><button id="themeToggle" class="icon-button" type="button" aria-label="切换深色模式" aria-pressed="false" title="切换深色 / 浅色主题">☾</button><button id="refreshConsole" class="icon-button" aria-label="刷新控制台状态" title="刷新状态">↻</button></div>
     </header>
     <main id="mainContent" tabindex="-1">
-      <div class="page-heading"><div><div class="eyebrow">QQ BRIDGE / CONSOLE</div><h1 id="pageTitle">让每一次连接，都自然发生。</h1><p id="pageDescription">掌握桥接状态，轻松管理你的 QQ 智能伙伴。</p></div>
+      <div class="page-heading"><div><div class="eyebrow">QQ BRIDGE / CONSOLE</div><h1 id="pageTitle">让每一次连接，都自然发生。</h1><p id="pageDescription">掌握桥接状态，轻松管理你的聊天智能伙伴。</p></div>
         <div class="search-wrap"><label class="sr-only" for="consoleSearch">搜索功能或参数</label><input id="consoleSearch" type="search" placeholder="搜索功能或参数…" autocomplete="off" aria-controls="searchResults" aria-expanded="false"><div id="searchResults" class="search-results" hidden></div></div>
       </div>
       <div id="connectionAlert" class="connection-alert" role="alert" hidden></div>
@@ -2407,7 +2407,7 @@ button:active:not(:disabled) {
           <label style="flex:1">学习会话 preset</label><input type="text" id="slangLearnerPreset" placeholder="qq-chat" style="width:120px">
         </div>
         <div class="row">
-          <label style="flex:1">学习工作区名</label><input type="text" id="slangWorkspaceTitle" placeholder="QQ 黑话学习" style="width:120px">
+          <label style="flex:1">学习工作区名</label><input type="text" id="slangWorkspaceTitle" placeholder="黑话学习" style="width:120px">
         </div>
         <div class="row">
           <label style="flex:1">自动联网研究</label><input type="checkbox" id="slangAutoResearch" style="width:auto">
@@ -2425,7 +2425,7 @@ button:active:not(:disabled) {
         <tr><th>工具</th><th>说明</th></tr>
         <tr><td>chat_status</td><td>登录状态（只读）</td></tr>
         <tr><td>chat_list_groups</td><td>群列表（只返回白名单群）</td></tr>
-        <tr><td>chat_get_group_members</td><td>群成员（只读，群号必须白名单）</td></tr>
+        <tr><td>chat_get_group_members</td><td>群成员（只读，群 id 必须白名单）</td></tr>
         <tr><td>chat_get_group_history</td><td>群历史（只读，含 message_id，可作引用目标）</td></tr>
         <tr><td>chat_send_group_message</td><td>发群消息；可选 <code>replyToMessageId</code> 引用/回复</td></tr>
         <tr><td>chat_reply</td><td>专用“引用/回复”：在群里引用某条消息并发送文本</td></tr>
@@ -2437,16 +2437,16 @@ button:active:not(:disabled) {
     </section>
 <section id="section-whitelist" data-page="access" class="card span-all">
       <h2>白名单 / 管理员</h2>
-      <label>允许的群号（逗号分隔）</label>
+      <label>允许的群 id（逗号分隔）</label>
       <input type="text" id="wlGroups" placeholder="123456789, 123456">
-      <label>允许的私聊 QQ（逗号分隔）</label>
+      <label>允许的私聊用户 id（逗号分隔）</label>
       <input type="text" id="wlPrivate" placeholder="123456789">
-      <label>管理员 QQ（ownerQQ，最高权限）</label>
+      <label>管理员 id（ownerQQ，最高权限）</label>
       <input type="text" id="ownerQQ" placeholder="123456789">
-      <div class="meta">管理员是唯一可执行管理命令/审批/closed-agent 的 QQ；可留空清除（清除后无管理员，fail-closed）。</div>
-      <label>拒绝的群号（黑名单，逗号分隔）</label>
+      <div class="meta">管理员是唯一可执行管理命令/审批/closed-agent 的用户；可留空清除（清除后无管理员，fail-closed）。</div>
+      <label>拒绝的群 id（黑名单，逗号分隔）</label>
       <input type="text" id="dnGroups" placeholder="">
-      <label>拒绝的私聊 QQ（黑名单，逗号分隔）</label>
+      <label>拒绝的私聊用户 id（黑名单，逗号分隔）</label>
       <input type="text" id="dnPrivate" placeholder="">
       <div class="row" style="margin-top:10px">
         <button id="wlSave">保存白名单</button>
@@ -2485,7 +2485,7 @@ button:active:not(:disabled) {
       <div class="meta">开启：回复被安全拦截时会在群里提示；关闭：直接沉默，只在日志/活动记录里留下记录。</div>
       <div id="stateDirWarn" style="display:none;margin-top:10px;padding:8px 10px;border-left:3px solid var(--warn,#d08700);background:rgba(208,135,0,.08)">
         <b>⚠️ state/ 目录权限未收紧</b>
-        <div class="meta" style="margin:4px 0">Windows 上改文件权限需要管理员身份，本次启动没能收紧 <code id="stateDirPath"></code>。它里面的控制台令牌、SnowLuma 令牌、各会话令牌与 QQ 聊天记录，本机任何已登录用户都可能读到。</div>
+        <div class="meta" style="margin:4px 0">Windows 上改文件权限需要管理员身份，本次启动没能收紧 <code id="stateDirPath"></code>。它里面的控制台令牌、SnowLuma 令牌、各会话令牌与聊天记录，本机任何已登录用户都可能读到。</div>
         <div class="meta">两种做法：① 用<b>管理员身份</b>打开终端执行下面这条命令（一次即可，可复制）；② 或者<b>用管理员身份重启桥接</b>，让它自己收紧。做完点下面的按钮复检。</div>
         <pre id="stateDirCmd" style="user-select:all;overflow:auto;margin:4px 0;padding:6px;background:rgba(127,127,127,.12);border-radius:4px"></pre>
         <button id="stateDirReharden" class="small">重新检测</button>
@@ -2516,7 +2516,7 @@ button:active:not(:disabled) {
           <option value="group">群</option>
           <option value="private">私聊</option>
         </select>
-        <input type="text" id="tsId" placeholder="群号 / QQ 号" style="width:140px">
+        <input type="text" id="tsId" placeholder="群 id / 用户 id" style="width:140px">
       </div>
       <label>消息内容</label>
       <textarea id="tsMsg" placeholder="这是一条测试消息"></textarea>
@@ -2533,20 +2533,20 @@ button:active:not(:disabled) {
         <span class="meta" id="restartMsg"></span>
       </div>
       <div class="row" style="margin-top:10px">
-        <button id="clearWsBtn" class="danger">清空 QQ 聊天工作区</button>
+        <button id="clearWsBtn" class="danger">清空聊天工作区</button>
         <span class="meta" id="clearWsMsg"></span>
       </div>
-      <div class="meta">由守护窗口启动时，重启后 5 秒自动恢复；清空工作区会归档全部 QQ 会话并清空活动日志。</div>
+      <div class="meta">由守护窗口启动时，重启后 5 秒自动恢复；清空工作区会归档全部聊天会话并清空活动日志。</div>
     </section>
 <section id="section-notify" data-page="operations" class="card span-all">
       <h2>后台控制端引导</h2>
-      <div class="meta">直接向指定 QQ 会话的 DSH agent 投递一条“后台控制端提醒”，用于给 AI 引导/提醒；该消息不是群友消息。二代模式（reserved2）下会自动附带会话令牌和二代工具协议说明，AI 的文本输出不会自动转发，发言需通过发送工具。</div>
+      <div class="meta">直接向指定聊天会话的 DSH agent 投递一条“后台控制端提醒”，用于给 AI 引导/提醒；该消息不是群友消息。二代模式（reserved2）下会自动附带会话令牌和二代工具协议说明，AI 的文本输出不会自动转发，发言需通过发送工具。</div>
       <div class="row" style="margin-top:10px">
         <select id="aiNotifyKind" style="width:110px">
           <option value="group">群</option>
           <option value="private">私聊</option>
         </select>
-        <input type="text" id="aiNotifyId" placeholder="群号 / QQ 号" style="width:180px">
+        <input type="text" id="aiNotifyId" placeholder="群 id / 用户 id" style="width:180px">
       </div>
       <label>提醒内容（发给 DSH agent 的引导/提醒）</label>
       <textarea id="aiNotifyMessage" placeholder="例如：接下来群里聊到某个话题时，你可以更主动一点；或：先潜水，等我叫你。"></textarea>
@@ -2707,7 +2707,9 @@ function renderSnowlumaHealth(sl) {
   } else if (!connected) {
     strong.textContent = '未连接';
     strong.className = 'err';
-    hint.textContent = '连不上 QQ 网关，请先启动 SnowLuma';
+    hint.textContent = sl.platform === 'discord'
+      ? '连不上 Discord，请检查 discord.token 与 Developer Portal 里的 intent 设置'
+      : '连不上 QQ 网关，请先启动 SnowLuma';
   } else {
     strong.textContent = '正常 · 接收中';
     strong.className = 'ok';
@@ -2940,7 +2942,7 @@ async function refreshSimPrompt() {
     document.getElementById('simPromptWarnings').textContent = (r.warnings || []).length
       ? '⚠️ ' + r.warnings.join('；') : '';
     document.getElementById('simPromptRestart').textContent =
-      '改动写入该代预设的源文件并同步到 DSH 的 preset 目录；preset 由 DSH 在会话创建时装配，因此新会话会自动用新版，正在进行的 QQ 会话需重置该会话或重启 DSH。';
+      '改动写入该代预设的源文件并同步到 DSH 的 preset 目录；preset 由 DSH 在会话创建时装配，因此新会话会自动用新版，正在进行的聊天会话需重置该会话或重启 DSH。';
   } catch (error) {
     setSimMsg('读取失败：' + (error?.message ?? error), false);
   }
@@ -2995,7 +2997,7 @@ async function refreshSessions() {
     const box = document.getElementById('sessionList');
     document.getElementById('metricSessions').textContent = s.sessions.length;
     if (!s.sessions.length) { box.innerHTML = '<div class="empty-state"><strong>还没有会话</strong><p>白名单中的群或好友发来消息后，会话会显示在这里。</p></div>'; return; }
-    let html = '<table><tr><th>QQ 会话</th><th>DSH 会话 ID</th><th>类型</th><th></th></tr>';
+    let html = '<table><tr><th>聊天会话</th><th>DSH 会话 ID</th><th>类型</th><th></th></tr>';
     for (const x of s.sessions) {
       const isP = x.key.startsWith('private:');
       const type = isP ? '<span class="pill b">私聊</span>' : '<span class="pill g">群</span>';
@@ -3018,7 +3020,7 @@ async function refreshPending() {
     const box = document.getElementById('pendingList');
     document.getElementById('metricPending').textContent = p.pending.length;
     document.getElementById('pendingCount').textContent = p.pending.length;
-    if (!p.pending.length) { box.innerHTML = '<div class="empty-state"><strong>暂时没有待处理请求</strong><p>AI 的提问或工具审批会出现在这里，请前往对应 QQ 会话回复。</p></div>'; return; }
+    if (!p.pending.length) { box.innerHTML = '<div class="empty-state"><strong>暂时没有待处理请求</strong><p>AI 的提问或工具审批会出现在这里，请前往对应聊天会话回复。</p></div>'; return; }
     let html = '<table><tr><th>会话</th><th>类型</th><th>详情</th></tr>';
     for (const x of p.pending) {
       const kind = x.kind === 'approval' ? '<span class="pill r">审批</span>' : '<span class="pill b">提问</span>';
@@ -3180,7 +3182,7 @@ document.getElementById('restartBtn').addEventListener('click', async () => {
   document.getElementById('restartMsg').textContent = r.message || '正在重启…';
 });
 document.getElementById('clearWsBtn').addEventListener('click', async () => {
-  if (!confirm('确定清空整个「QQ 聊天」工作区？\n将归档全部 QQ 会话、清除所有上下文映射、清空活动日志。\n此操作不可撤销。')) return;
+  if (!confirm('确定清空整个聊天工作区？\n将归档全部聊天会话、清除所有上下文映射、清空活动日志。\n此操作不可撤销。')) return;
   const r = await api('/api/workspace/reset', 'POST', {});
   document.getElementById('clearWsMsg').textContent = r.ok ? (`✅ 已归档 ${r.archivedCount} 个会话，工作区已清空`) : ('❌ ' + (r.error || '失败'));
   document.getElementById('clearWsMsg').className = r.ok ? 'meta ok' : 'meta err';
@@ -3190,7 +3192,7 @@ document.getElementById('aiNotifySend').addEventListener('click', async () => {
   const kind = document.getElementById('aiNotifyKind').value;
   const id = document.getElementById('aiNotifyId').value.trim();
   const message = document.getElementById('aiNotifyMessage').value.trim();
-  if (!id || !message) { alert('请填写群号/QQ 号和提醒内容'); return; }
+  if (!id || !message) { alert('请填写群 id / 用户 id 和提醒内容'); return; }
   const r = await api('/api/console/notify-ai', 'POST', { key: kind + ':' + id, message });
   const msg = document.getElementById('aiNotifyMsg');
   msg.textContent = r.ok ? ('✅ 已投递到 DSH：' + r.sessionId) : ('❌ ' + (r.error || '失败'));
@@ -3772,7 +3774,7 @@ async function loadV2InitialPrompt() {
 }
 async function saveV2InitialPrompt() {
   const key = v2InitPromptKeyValue();
-  if (!key) { setV2InitPromptMsg('请输入会话 key（group:群号 或 private:QQ号）', 'err'); return; }
+  if (!key) { setV2InitPromptMsg('请输入会话 key（group:群id 或 private:用户id）', 'err'); return; }
   setV2InitPromptMsg('保存中…');
   try {
     const r = await api('/api/socialV2/initial-prompt', 'POST', { key, text: v2InitPromptTextEl.value });
@@ -4346,7 +4348,7 @@ function loadSlangConfig() {
     document.getElementById('slangThresholds').value = (c.inferenceThresholds || [2, 4, 8]).join(', ');
     document.getElementById('slangInjectMax').value = c.injectMax ?? 8;
     document.getElementById('slangLearnerPreset').value = c.learnerPreset || 'qq-chat';
-    document.getElementById('slangWorkspaceTitle').value = c.workspaceTitle || 'QQ 黑话学习';
+    document.getElementById('slangWorkspaceTitle').value = c.workspaceTitle || '黑话学习';
     document.getElementById('slangAutoResearch').checked = c.autoResearch !== false;
   }).catch(() => {});
 }
@@ -4425,8 +4427,8 @@ document.getElementById('consoleTokenRandom').addEventListener('click', () => ch
 
 // Presentation layer: keep every existing control mounted so drafts and API contracts survive navigation.
 const consolePages = {
-  overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
-  sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
+  overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的聊天智能伙伴。'],
+  sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看聊天会话与 DSH 会话的映射，以及等待你回复的审批和提问。'],
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
   'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
   'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
@@ -4844,7 +4846,7 @@ function renderUsageConversations(r) {
   const sym = r.symbol || '¥';
   usageConversationsCache = list;
   if (!list.length) {
-    box.innerHTML = '<div class="empty-state"><strong>还没有用量记录</strong><p>QQ 会话产生一次 LLM 调用后，这里会按群 / 好友列出 token 与花费。新账本从桥接重启后开始记账。</p></div>';
+    box.innerHTML = '<div class="empty-state"><strong>还没有用量记录</strong><p>聊天会话产生一次 LLM 调用后，这里会按群 / 好友列出 token 与花费。新账本从桥接重启后开始记账。</p></div>';
     return;
   }
   const maxCost = Math.max(...list.map(x => Number(x.cost) || 0), 0);

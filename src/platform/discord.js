@@ -18,6 +18,7 @@
 //     附件                  → image / record（含语音消息）/ video / file{name}
 //     回复                  → reply{id}（只认同一频道内的回复）
 //     转发（message snapshot）→ 文字「[转发] 」加上被转发消息的内容
+//   入站过滤：其它 bot 与 webhook 发的消息直接丢弃（不进未读、不唤醒）。
 //   出站：
 //     · 只有 sendMessage 的 mentionUserId 会真的提醒到人；文本里的 @everyone、身份组、
 //       其它 <@id> 一律不提醒（allowedMentions），对应 QQ 那边「禁止 @全体」的约束。
@@ -490,6 +491,8 @@ export function createDiscordPlatform({ cfg, log, client: injectedClient = null 
       noteEvent('MESSAGE_CREATE');
       if (!ACCEPTED_MESSAGE_TYPES.has(message?.type)) return;
       if (client.user && String(message?.author?.id) === String(client.user.id)) return;
+      // 其它 bot（含 webhook）的消息一律不进桥接：两个 bot 在同一频道会互相接话停不下来。
+      if (message?.author?.bot === true) return;
       rememberMessage(message.id, message.channelId);
       try {
         await messageHandler?.(toInboundMessage(message, selfContext(message)));
