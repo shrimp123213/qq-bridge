@@ -1,6 +1,6 @@
 # 控制台离线预览与回归测试
 
-这些脚本只读取控制台 HTML，使用内存中的演示数据模拟 API。不会加载项目入口、配置文件、真实 state，也不会连接 QQ 或 DSH。重启、清空、发送消息等按钮只改变内存或返回模拟结果。
+这些脚本只读取控制台 HTML，使用内存中的演示数据模拟 API。不会加载项目入口、配置文件、真实 state，也不会连接 Discord 或 DSH。重启、清空、发送消息等按钮只改变内存或返回模拟结果。
 
 ## 启动预览
 
@@ -16,11 +16,10 @@ npm run preview:console          # 等价于 node scripts/console-ui-fixture.mjs
 
 ```sh
 node scripts/console-ui-fixture.mjs --port=4174
-node scripts/console-ui-fixture.mjs --original --port=4174
 node scripts/console-ui-fixture.mjs --html=path/to/console.html
 ```
 
-`--original` 读取 `scripts/fixtures/console.before.html`（改造前的原版，随仓库保留），仅用于对照预览；正常预览读取 `public/console.html`。
+预览读取 `public/console.html`；`--html` 可以换成别的控制台文件。
 
 ## 浏览器回归
 
@@ -61,14 +60,14 @@ node scripts/test-console-ui.mjs --artifacts=docs/ui-verification
 
 ## 基线说明
 
-`console-ui-legacy-ids.json` 保存改造前的 225 个元素 ID。`console-ui-contracts.json` 来自原控制台在相同 fixture 中执行相同操作后的 24 次写请求，包含二代配置的完整嵌套参数。
+`console-ui-legacy-ids.json` 保存必须一直存在的 215 个元素 ID（改造前的 225 个，减去 Discord 版删掉的拍一拍唤醒与表情包参数）。`console-ui-contracts.json` 是控制台在相同 fixture 中执行相同操作后的写请求，包含二代配置的完整嵌套参数。
 
-只有后端契约经过明确调整时才更新基线。`scripts/fixtures/console.before.html` 是改造前的原版控制台（通常无需改动），重录时运行：
+只有后端契约经过明确调整时才更新基线，重录时运行：
 
 ```sh
-node scripts/test-console-ui.mjs --original --record-baseline
+node scripts/test-console-ui.mjs --record-baseline
 ```
 
-普通回归不依赖 `console.before.html`。不要用真实的 `test-console.mjs` 替代本脚本：那个脚本可能向真实 QQ 发送消息。
+不要用真实的 `test-console.mjs` 替代本脚本：那个脚本可能向真实 Discord 发送消息。
 
-此回归验证前端行为和提交契约，不能替代真实 QQ / DSH 集成测试。
+此回归验证前端行为和提交契约，不能替代真实 Discord / DSH 集成测试。

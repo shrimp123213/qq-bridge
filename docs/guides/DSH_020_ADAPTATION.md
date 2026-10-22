@@ -1,4 +1,4 @@
-# DSH 0.2.0 适配改动记录（qq-bridge v0.1.7 → v0.2.0）
+# DSH 0.2.0 适配改动记录（v0.1.7 → v0.2.0）
 
 > **本文的边界**：只记录**为适配 DSH 0.2.0-rc.2 而做的改动**。每一条给出四件事：
 > 现象 / 为什么必须改 / 证据 / 怎么验证。
@@ -9,6 +9,11 @@
 >
 > 适配目标：`@deepseek-ai/dsh` **0.2.0-rc.2**（上一版适配目标是 0.1.7-rc.2）。
 > 对应提交：`e43186a`（主体）；本文写于 2026-10-02。
+>
+> ⚠️ **移植说明**：本文的全部实测都是在本项目移植到 Discord **之前**做的；当时的 preset、插件、
+> 测试脚本与平台 MCP 名字不同，平台 MCP 也多一个。下文已把名字换成现在的（`dc-chat` / `dc-chat-v2` /
+> `discord-*` / `test-mode-plugin.mjs`），但 **Discord 版没有在运行中的 DSH 上重跑这些实测（未验证）**。
+> DSH 侧的协议结论与平台无关，仍然有效。
 
 ---
 
@@ -19,9 +24,9 @@
 
 **真正需要改的是三处**，而且其中**最严重的一处并不是 0.2.0 造成的**（见 §2.1 的事实核对）：
 
-1. 会话待处理队列读不出来 ⇒ **每一次**退役/重置 QQ 会话都在抛错，旧任务继续跑；
-2. QQ 安全守卫的名单没跟上 0.2.0 的真实工具面（新增了能绕过 L7 的口子）；
-3. `qq-mode` 设置命名空间的注册 API 被 0.2.0 删除（旧代码靠一句早退"看起来正常"）。
+1. 会话待处理队列读不出来 ⇒ **每一次**退役/重置聊天会话都在抛错，旧任务继续跑；
+2. 聊天安全守卫的名单没跟上 0.2.0 的真实工具面（新增了能绕过 L7 的口子）；
+3. `discord-mode` 设置命名空间的注册 API 被 0.2.0 删除（旧代码靠一句早退"看起来正常"）。
 
 外加一处**0.1.7 时代遗留、本轮一并清零**的适配缺口：9 个诊断/运维脚本的鉴权路径早已失效（§5）。
 
@@ -32,11 +37,11 @@
 | # | 文件 | 改动 | 对治的问题 |
 | --- | --- | --- | --- |
 | 1 | `src/dsh-client.js` | 新增 `inboxItemsOfProjections` / `inboxItemIds` / `controlBaselineInboxItems`；`_readSessionQueue` 改为「`session/projections` 主路径 + `session/control` 回退」；`METHOD_ARG_WRAPPERS` 增加 `session/projections` | §2 队列读不出来 |
-| 2 | `plugins/qq-agent-presets/qq-tool-restrict.mjs` | restrict 名单 **52 → 67**，补 15 个名字 | §3 工具面漂移 |
+| 2 | `plugins/discord-agent-presets/discord-tool-restrict.mjs` | restrict 名单 **52 → 67**，补 15 个名字 | §3 工具面漂移 |
 | 3 | `scripts/dsh-tool-names.mjs`（新增） | 工具名抽取的**唯一实现**（原测试里那份模糊抽取器误报真名） | §3 对账工具 |
 | 4 | `scripts/scan-dsh-tool-names.mjs`（新增） | 拿安装包与守卫名单双向求差的 CLI（`npm run scan:tool-names`） | §3 对账工具 |
-| 5 | `plugins/qq-mode-console/lib/index.js` | 删掉 0.2.0 已移除的 `ctx.settings.register()` 死路，`apply()` 改为显式空实现 | §4 设置命名空间 |
-| 6 | `scripts/test-qq-mode-plugin.mjs` | 重写为 6 项，钉住命名空间可用的三点前提 + 「不许把已删除的 API 加回来」 | §4 |
+| 5 | `plugins/discord-mode-console/lib/index.js` | 删掉 0.2.0 已移除的 `ctx.settings.register()` 死路，`apply()` 改为显式空实现 | §4 设置命名空间 |
+| 6 | `scripts/test-mode-plugin.mjs` | 重写为 6 项，钉住命名空间可用的三点前提 + 「不许把已删除的 API 加回来」 | §4 |
 | 7 | `scripts/probe-auth.mjs`（新增）+ 5 个探针 + 4 个运维脚本 | 鉴权统一走离线铸造 Cookie；夹具改到系统临时目录 | §5 遗留缺口 |
 | 8 | `scripts/probe-020-protocol.mjs`、`probe-020-settings.mjs`（新增） | 0.2.0 契约探针（帧结构 / settings 命名空间） | §2 §4 取证 |
 | 9 | `scripts/test-dsh-inbox-projection.mjs`（新增，12 项） | 用**真实 0.2.0 帧骨架**钉住队列解析（离线，已进 `test:audit`） | §2 回归网 |
@@ -70,7 +75,7 @@
 
 ### 2.2 现象
 
-桥接退役/重置 QQ 会话时要先清掉 DSH 侧还没跑的队列，再取消当前 turn（`stopSessionWork`）。
+桥接退役/重置聊天会话时要先清掉 DSH 侧还没跑的队列，再取消当前 turn（`stopSessionWork`）。
 日志里每次都是：
 
 ```
@@ -126,7 +131,7 @@ POST /api/session/projections   { request: { sessionId } }
 
 ---
 
-## 3. 断裂点二：QQ 安全守卫名单没跟上 0.2.0 的工具面
+## 3. 断裂点二：聊天安全守卫名单没跟上 0.2.0 的工具面
 
 ### 3.1 为什么这是安全问题而不是清洁问题
 
@@ -155,7 +160,7 @@ POST /api/session/projections   { request: { sessionId } }
 
 | 组 | 名字 | 为什么必须隐藏 |
 | --- | --- | --- |
-| ① **全局层默认启用，仿真会话真的会继承** | `list_mcp_resources`、`list_mcp_resource_templates`、`read_mcp_resource` | `dsh-base` 的 `mcp-resources` 行**没有被 disabled**，所以每个 QQ 会话都拿到这三个工具。`read_mcp_resource` 的 `server` 参数可以指向**任意已配置的 MCP server**：用户一旦挂了 filesystem 之类的能力型 MCP，QQ 群就通过它拿到了文件读取权 |
+| ① **全局层默认启用，仿真会话真的会继承** | `list_mcp_resources`、`list_mcp_resource_templates`、`read_mcp_resource` | `dsh-base` 的 `mcp-resources` 行**没有被 disabled**，所以每个聊天会话都拿到这三个工具。`read_mcp_resource` 的 `server` 参数可以指向**任意已配置的 MCP server**：用户一旦挂了 filesystem 之类的能力型 MCP，聊天频道就通过它拿到了文件读取权 |
 | ② 派生 agent / 执行外部代码 | `subagent_codex`、`subagent_claude_code`、`spawn_teammate`、`team_task_{create,get,list,update}` | Codex / Claude Code 子智能体与实验性 Team 模式都能间接拿到 shell。当前只在 DSH 自带 preset 里挂载，列进来是**回归网**（别的 composition 一旦推进全局层就被挡住） |
 | ③ 插件装载权 = 任意代码执行 | `plugin_manager` | 安装/卸载/启停插件，内部会 spawn pnpm |
 | ④ 无人值守的自我调度 | `schedule_{create,list,update,delete}` | 0.2.0 起 `dsh-schedule` 是可选 bundle，装上就是"agent 给自己排定时任务" |
@@ -167,7 +172,7 @@ POST /api/session/projections   { request: { sessionId } }
 
 ---
 
-## 4. 断裂点三：`qq-mode` 设置命名空间的注册 API 被删除
+## 4. 断裂点三：`discord-mode` 设置命名空间的注册 API 被删除
 
 ### 4.1 现象（不明显，因为被一句早退挡住了）
 
@@ -182,11 +187,11 @@ DSH 0.2.0 删除了 `ctx.settings.register(ns, schema, opts)`——`SettingsForm
 
 在 0.2.0 上实测（`npm run probe:settings` / `verify:adaptation`）：
 
-- `settings/describe` 列出 **20 个**命名空间，其中**有** `qq-mode`，`value = {"mode":"reserved2"}`，带 `revision`；
+- `settings/describe` 列出 **20 个**命名空间，其中**有** `discord-mode`，`value = {"mode":"reserved2"}`，带 `revision`；
 - `settings/update` 写回成功并返回 `SettingsNamespaceView`。
 
 即三点前提在 0.2.0 依然成立且是唯一路径：**① entry id 恰好等于命名空间名**（`cordis.patch.yml` 的
-`id: qq-mode`）、**② 插件模块导出 `Config`**、**③ `Config` 至少一个 `volatile` 字段**。
+`id: discord-mode`）、**② 插件模块导出 `Config`**、**③ `Config` 至少一个 `volatile` 字段**。
 
 > 附带更正一条 0.2.0 的接口形状：`settings/update` 是**多参数** RPC，args 是
 > `{ ns, patch, expectedRevision }` **平铺**，不是 `{ request: {...} }`
@@ -201,10 +206,10 @@ DSH 0.2.0 删除了 `ctx.settings.register(ns, schema, opts)`——`SettingsForm
 
 ### 4.4 怎么验证
 
-`test-qq-mode-plugin.mjs` 重写为 6 项：导出形状、entry id 等于命名空间名、`Config` 可用且带 volatile
+`test-mode-plugin.mjs` 重写为 6 项：导出形状、entry id 等于命名空间名、`Config` 可用且带 volatile
 （含 schemastery `toJSON()` 的**引用表**形状——顶层是 `{uid, refs}`，dict 在 refs 里）、
 schema 接受全部 mode 拼写、**不再出现 `settings.register`**（只看可执行代码，剥注释）、
-以及缺 settings 服务时不抛。活 DSH 侧由 `verify:adaptation` 的 qq-mode 段覆盖。
+以及缺 settings 服务时不抛。活 DSH 侧由 `verify:adaptation` 的模式命名空间段覆盖。
 
 ---
 
@@ -232,7 +237,7 @@ schema 接受全部 mode 拼写、**不再出现 `settings.register`**（只看�
 ### 6.1 版本身份 0.1.7 → 0.2.0
 
 沿用项目约定（版本号与 DSH 对齐）。改动点：`package.json`、`package-lock.json`（顶层 + `packages[""]`）、
-`plugins/qq-mode-console/package.json`、`plugins/qq-agent-presets/package.json`、三个 MCP server 的
+`plugins/discord-mode-console/package.json`、`plugins/discord-agent-presets/package.json`、（当时）三个 MCP server 的
 `serverInfo.version`。全部由 `verify:adaptation` 的既有断言钉住（防止再次出现"自报版本与包版本不一致"）。
 
 ### 6.2 验证脚本改名与重写
@@ -241,7 +246,7 @@ schema 接受全部 mode 拼写、**不再出现 `settings.register`**（只看�
 （0.1.7 那次为了不打断调用方沿用了旧文件名，结果留下一个"自称 015 却在验 0.2.0"的脚本；
 `npm run verify:adaptation` 入口名保持不变，所以既有调用不受影响）。
 
-活 DSH 段按 0.2.0 重写，新增/保留：qq-mode 可列可写、`session/projections`、
+活 DSH 段按 0.2.0 重写，新增/保留：模式命名空间可列可写、`session/projections`、
 **control baseline 形状（有 `projections`、无 `queues`）**、`stopSessionWork` 不抛、
 `$events` ready 帧、`session/modelCatalog`、点号 endpoint 仍 404。
 语法检查在禁止 spawn 的环境里改为**显式记 `⏭ 跳过`**，而不是输出 8 条假失败把真失败淹掉。
@@ -250,7 +255,7 @@ schema 接受全部 mode 拼写、**不再出现 `settings.register`**（只看�
 
 | 文档 | 原问题 |
 | --- | --- |
-| `README.md` / `README.en.md` | 版本行停在 0.1.7；`README.en.md` 更旧，仍停在 v0.1.5，且**仍在介绍已删除的 `start_snowluma`/`stop_snowluma`**；preset 安装位置写成已废弃的 `~/.dsh/.agent-presets/`；`dsh.authToken` 说明仍在讲"从 guard 日志自动发现" |
+| `README.md` / `README.en.md` | 版本行停在 0.1.7；`README.en.md` 更旧，仍停在 v0.1.5，且**仍在介绍已删除的平台客户端启停工具**；preset 安装位置写成已废弃的 `~/.dsh/.agent-presets/`；`dsh.authToken` 说明仍在讲"从 guard 日志自动发现" |
 | `docs/guides/DSH_SETUP.md` | 同上（preset 位置、命名空间机制、401 排查步骤）；断言项数 45 → 65；EPERM 的说明改为"显式跳过" |
 | `docs/FOLDER_MAP.md` | 脚本数、被删/新增脚本、探针状态 |
 | `docs/guides/SECURITY_BASELINE.md` | 守卫两道闸门与对账工具；回归清单脚本数与新增命令 |
@@ -284,7 +289,7 @@ HTTP transport 下起作用，而三个 MCP server 全是 stdio。清掉是为�
   **代价（沙箱里写不了 state/）已被接受**，项目的规矩随之明确：沙箱里跑的东西一律不写 `state/`（§5 已落实）。
 - ⛔ 因此**绝不能**用 `/inheritance:e` 去"修好" `state/`：实测确认恢复继承会把父目录的
   `Authenticated Users: Modify` 与 `BUILTIN\Users: ReadAndExecute` 一起带回来，等于把凭据重新开放。
-- 顺带发现 `plugins/qq-agent-presets/**` 与 `plugins/qq-mode-console/**` 的内容也被切断了继承，
+- 顺带发现两个插件目录（现为 `plugins/discord-agent-presets/**` 与 `plugins/discord-mode-console/**`）的内容也被切断了继承，
   而**本仓库没有任何脚本这么做**（全历史 `-S` 搜索 + 已安装插件扫描都没有），来源不明。
   这两处不含凭据，是否恢复由使用者决定。
 
@@ -300,11 +305,11 @@ HTTP transport 下起作用，而三个 MCP server 全是 stdio。清掉是为�
 | **RPC 面** | 枚举 0.2.0 全部远端 endpoint（约 140 个）后逐条比对：桥接用到的**每一个都还在**——`session/{list,create,prompt,cancel,selectModel,rename,fork,updateQueue,page,search,follow,modelCatalog}`、`workspace/{create,rename,delete,archiveSession,insertBefore,insertSessionBefore}`、`agentPresets/list`、`settings/describe`。点号 endpoint 仍 404（协议确为斜杠式） |
 | **`$events` / 审批提问链路** | `$events`、`$events/result` 仍在；waterfall 帧形状不变 `{type:'waterfall', event, eventId, agentId, request}`；`approval/request` 与 `user-questions/request` 仍在 `API_REMOTE_FORWARDED_EVENTS` 白名单里；`request.toolName/callId/reason` 与 `request.questions` 字段未变；outcome 形状 `{kind:'next'|'result'|'rejected'}` 与网关校验一致 |
 | **`session/follow`** | 请求形状 `{ address:{kind:'session',sessionId}, maxMessages }` 未变；快照键集与 `projections` 仍在 |
-| **三个 MCP server** | DSH 客户端已升级到官方 SDK **v2**，而 server 用的是 v1.30.0：实测五个协议修订版本两侧完全一致，`server/discover` 探测失败会**干净回落**到 2025 握手；`toolCallTimeoutMs` / `serverName` / `mcp__<server>__<tool>` 命名规则 / `serverInfo` 形状均未变；MCP 输入 schema **原样透传**（harness 的 JSON Schema 子集只约束 output schema，因此 ~20 处 `z.union` 产生的 `anyOf` 不受影响）。活链路实测：`mcp__snowluma__qq_status` 返回真实账号信息，三个 server 共 **38** 个工具 |
-| **模型目录** | `deepseek-flash` 仍在（新增 `deepseek-v4-pro`），思考档位 `off/low/high/max`。控制台把 `off` 过滤掉是**有意的产品决策**（QQ 聊天助手依赖思考），与内置白名单自洽，未改；实测 `/api/dsh/model` 返回 `options:["low","high","max"]` 且 `labels` 里带 `off`，说明动态读取链路在 0.2.0 正常 |
+| **三个 MCP server** | DSH 客户端已升级到官方 SDK **v2**，而 server 用的是 v1.30.0：实测五个协议修订版本两侧完全一致，`server/discover` 探测失败会**干净回落**到 2025 握手；`toolCallTimeoutMs` / `serverName` / `mcp__<server>__<tool>` 命名规则 / `serverInfo` 形状均未变；MCP 输入 schema **原样透传**（harness 的 JSON Schema 子集只约束 output schema，因此 ~20 处 `z.union` 产生的 `anyOf` 不受影响）。活链路实测：当时平台 MCP 的状态工具返回真实账号信息，当时三个 server 共 **38** 个工具 |
+| **模型目录** | `deepseek-flash` 仍在（新增 `deepseek-v4-pro`），思考档位 `off/low/high/max`。控制台把 `off` 过滤掉是**有意的产品决策**（聊天助手依赖思考），与内置白名单自洽，未改；实测 `/api/dsh/model` 返回 `options:["low","high","max"]` 且 `labels` 里带 `off`，说明动态读取链路在 0.2.0 正常 |
 | **`settings/update` 参数形状** | 是平铺多参数（见 §4.2），桥接原本就对 |
-| **preset / bundle 机制** | `@deepseek-ai/dsh-agent-preset` 行 + `plugins/qq-agent-presets` bundle patch 仍有效；两个 preset 的 persona schema 仍通过；`id: qq-mode` 行 + 导出的 `Config` 仍能让命名空间可读写（§4.2） |
-| **`session/create` + preset** | 活 DSH 实测：挂 `qq-chat-v2` 成功，`agentPresets/list` 含 `qq-chat` 与 `qq-chat-v2` |
+| **preset / bundle 机制** | `@deepseek-ai/dsh-agent-preset` 行 + `plugins/discord-agent-presets` bundle patch 仍有效；两个 preset 的 persona schema 仍通过；`id: discord-mode` 行 + 导出的 `Config` 仍能让命名空间可读写（§4.2） |
+| **`session/create` + preset** | 活 DSH 实测：挂二代聊天 preset 成功，`agentPresets/list` 含两个聊天 preset（当时的名字） |
 | **`session/modelCatalog`** | 仍可用，返回 `default` / `routableProviders` / `groups` / `failures`，桥接的思考强度下拉依赖它 |
 
 ---
@@ -315,7 +320,7 @@ HTTP transport 下起作用，而三个 MCP server 全是 stdio。清掉是为�
 
 | 命令 | 结果 |
 | --- | --- |
-| `npm run test:audit` | **30/30 脚本通过**（清单新增 `test-dsh-inbox-projection.mjs`、`test-qq-mode-plugin.mjs`） |
+| `npm run test:audit` | **30/30 脚本通过**（清单新增 `test-dsh-inbox-projection.mjs`、`test-mode-plugin.mjs`） |
 | `npm run verify:adaptation` | **73 通过 / 0 失败**（含 8 项语法检查；在禁止 spawn 的环境里这 8 项显式跳过，计 65） |
 | `npm run test:dsh-auth` | 17 项通过 |
 | `npm run scan:tool-names` | 悬空假名 0 / 未覆盖危险名 0（扫 282 个包） |
@@ -329,16 +334,16 @@ HTTP transport 下起作用，而三个 MCP server 全是 stdio。清掉是为�
 > 在 DSH 沙箱会话里会被系统拦成 EPERM。**那是环境限制，不是代码问题**——
 > 上面这些数字是在无沙箱终端下取得的；只在沙箱里跑时，相关项会显式标为跳过。
 
-### 9.2 真实 QQ 链路实测（活群）
+### 9.2 真实聊天链路实测（移植前的平台）
 
-在真实白名单群里跑通了一个完整来回（记录取自 `state/`）：
+在真实白名单群聊里跑通了一个完整来回（记录取自 `state/`）：
 
 | 时刻 | 发生的事 |
 | --- | --- |
 | 22:07:45 | 入站：`@小鲸鱼`（owner）→ 进未读队列 |
-| 22:07:54 | 桥接**新建 DSH 会话**、挂上 `qq-chat-v2` preset、模型固定 `deepseek-official/deepseek-flash (max)` |
-| 22:07:56 | agent 调 `qq_get_prompt` → 拿到会话令牌与人设 ✅ |
-| 22:08:02 | agent 调 `qq_send_message` → **成功 2/2 条** |
+| 22:07:54 | 桥接**新建 DSH 会话**、挂上二代聊天 preset、模型固定 `deepseek-official/deepseek-flash (max)` |
+| 22:07:56 | agent 调取提示词工具（现为 `chat_get_prompt`）→ 拿到会话令牌与人设 ✅ |
+| 22:08:02 | agent 调发送工具（现为 `chat_send_message`）→ **成功 2/2 条** |
 | 22:08:15 | 入站：`没事` |
 | 22:08:29 | agent 再发 1 条 → **成功 1/1** |
 
@@ -368,71 +373,16 @@ HTTP transport 下起作用，而三个 MCP server 全是 stdio。清掉是为�
 
 ---
 
-## 附：v0.2.0-r3 —— SnowLuma 上游健康、客户端库升级、全新 clone 可移植性
+## 附：v0.2.0-r3 —— 全新 clone 可移植性、版本号方案
 
 > **版本说明**：本节内容曾以 `v0.2.1` 这个标签发布过约 26 分钟，随后因改用
 > 「主版本与 DSH 同步 + `rN` 后缀」的方案，该标签与对应 Release **已撤回**。
 > 提交本身仍在 `main` 历史里，内容 100% 包含在 `v0.2.0-r3`，撤回不影响任何功能。
 > 完整序列见本节 H。
-
-v0.2.0 发布后，有人反馈「**QQ 注入失败**」。调查后修了三类问题。
-**这一节与 DSH 无关**，属于 SnowLuma 侧观测能力与打包质量。
-
-### A. 起因与结论：那个报障**不是**本桥接造成的
-
-「注入」在这个技术栈里只发生在一处：**SnowLuma 用原生组件挂进 QQ 客户端进程**
-（它日志里叫 `[Hook]`，载体是安装目录的 `native/snowluma-win32-x64.{dll,node}`）。
-本桥接**没有任何原生/注入面**：7 个依赖全为纯 JS，`src/` 里没有 `.dll`/`.node`/FFI/进程注入，
-也不启动、不控制 SnowLuma 或 QQ（v0.1.5 起按 EULA §5.4 移除了启停工具）。
-
-但**桥接让这个失败无法诊断** —— 这才是要修的：
-
-| SnowLuma 的 `[Hook]` 退化时 | 桥接此前看到的现象 |
-| --- | --- |
-| 进程与 OneBot WebSocket **都还活着** | `bot.on('open')` 打过「SnowLuma 已连接」 |
-| 但收不到 QQ 侧数据（`receive path stale`） | 群里一条消息都不来 |
-| 它自己报 `good=false` | 桥接**从不读 `good`**；没有看门狗（对比：DSH 有 5 秒探活）、`/api/status` 没有字段、控制台没有指示、文档没有排查分支 |
-
-⇒ 症状是「接了但没反应」，而**没有任何证据指向 SnowLuma**，于是被报成「qq-bridge 注入失败」。
-用户自己的 SnowLuma 日志里 `receive path stale` 出现过 4 次（3 次自愈）—— 这个状态是**常态化偶发**，
-不是别人的特殊环境。
-
-**修复**：桥接现在把上游健康报出来（`/api/status.snowluma` + 控制台「运行总览」卡片 +
-「访问与安全」告警条 + 边沿触发日志），并明确指向 SnowLuma 的 `[Hook]` 日志。判定分两级：
-`good=false` 是**确认**；「连心跳都没有」是**另一个故障面**（进程/WS 层面），措辞分开。
-
-### B. 上游健康的两处实现错误（做完就发现是错的，已修）
-
-这两条值得单独记，因为它们是**同一个失败形态的复现** —— "看起来在工作，其实永远不会触发"：
-
-| 错法 | 后果 | 正确做法 |
-| --- | --- | --- |
-| `good` 取自 **`get_login_info`** | 它只返回 `{user_id, nickname}`，`good` 永远 `undefined`；而 SDK **只校验 status/retcode 信封、不校验 data 载荷** ⇒ 不报错、`good` 永远停在 `null`，那条"权威信号"整条是**死代码** | 取自 **`get_status`**（`{online, good}`），以及**每 30 秒心跳载荷里的 `status.good`** |
-| 用心跳/事件**静默**判断 hook 死活 | 心跳由 SnowLuma **自己的定时器无条件**发出（`HEARTBEAT_INTERVAL = 3e4`），不经过 QQ 事件流水线 ⇒ 静默**永远不触发**，检测不到它声称要检测的东西 | 接收链路的健康度只在 `status.good` 里；静默只能说明**进程/WS 卡住**，是另一个故障面 |
-
-两条都实测核对过 SnowLuma 1.14.9 运行时源码，并用 `npm run probe:heartbeat` 连真实网关验证：
-`status = {"online":true,"good":true}`、`interval = 30000`。
-新增 `test-snowluma-upstream-health.mjs`（9 项）把这两条钉住 —— 特别是**反面断言**：
-不得从 `get_login_info` 取 `good`、静默分支不得把结论指向 `[Hook]`。
-
-### C. 客户端库升级 1.14.9/1.14.10 → 1.14.20
-
-- 上游 1.14.9→1.14.20 共 **139 次提交 / 300 个文件**。逐面核对（含 190→195 动作目录双向 diff）：
-  **无移除动作、无参数改名、无入站事件形状变化、无 stdout 风险**（`@snowluma/mcp` 在 `src/` 里零引用，
-  且它只往 stderr 写）。
-- **上游打包 bug 仍在**（dist 相对导入缺 `.js`），`postinstall` 补丁依旧必需（仍命中 13 个文件）。
-- 顺带修两处**只影响升级运行时之后**的正确性问题：
-  `markdown` 段落此前落到 default 分支、被喂字面量 `[markdown]`（上游 1.14.17 的 changelog 里列为 `1934e4e7`；
-  **实测 1.14.20 的线上段落是 `data:{content}`**，桥接读 `d.text ?? d.content`，两个形状都覆盖）；
-  图片段落读的是 camelCase `subType` 而线上字段是 snake_case `sub_type`（一直是空串，且不报错）。
-- 新增 `npm run probe:heartbeat`：只读探针，验证心跳字段是否真的存在。
-
-### D. 端点自愈会覆盖用户写的 `wsUrl`
-
-`applyHealedTokens` 会把**发现到的** `wsUrl` 无条件写回 `config.json`。主场景（换账号端口变了）是对的，
-但它不区分「配置里是过期值」与「用户就是要指向别处」。实测踩到：把 `wsUrl` 指向死端口想让它别连，
-启动后仍被改回真实端点并连上 —— **想跑第二实例/指向另一份 SnowLuma 安装时会连错账号**。
-新增 `snowluma.followDiscoveredEndpoint`（默认 `true`＝保持既有行为），设 `false` 则只自愈 token、绝不动 URL。
+>
+> **移植说明**：r3 原本还有 A–D、F、G 六节，讲的都是移植前那个平台的上游网关（健康上报、客户端库升级、
+> 端点自愈、双 token、运行时实测）。Discord 版没有这层网关，这六节已删去，需要时看 git 历史。
+> 下面只保留与平台无关的三节，字母编号沿用原文。
 
 ### E. 全新 clone 上 `npm run test:audit` 会失败 7 个脚本（真实的打包缺陷）
 
@@ -453,33 +403,7 @@ v0.2.0 发布后，有人反馈「**QQ 注入失败**」。调查后修了三类
 验证（两种模式都 **31/31**）：把工具目录指向不存在时输出 19 条明确的跳过、依旧 31/31。
 另用**负向对照**确认这是诚实跳过而非刷绿：故意破坏一个仓库内断言 → 仍然 `exit=1`。
 
-### F. 顺带记录：HTTP token 与 WS token 是两个不同的值
-
-SnowLuma 同一账号的 **HTTP token（3000）与 WS token（3001）不同**，而 `config.json` 只能存一个（存 HTTP 的）。
-所以桥接**每次启动的首次 WS 连接几乎必然失败一次**（`连接断开(1006)` → 自愈 → `已连接`）。
-这条序列是正常的，日志文案已改清楚；真正会一直连不上的是**自愈无从下手**
-（`homeDir` 没配/被移动/读不到 `config/onebot_<QQ>.json`）—— 那才要查。
-
-### G. 运行时升到 1.14.20 的实测（2026-10-03）
-
-把用户的运行时从 1.14.9 升到 1.14.20 并逐项实测（**安装/启动由用户自己做**，本次只做了下载、校验、
-迁移与核对）。结论：
-
-| 检查 | 证据 |
-| --- | --- |
-| 包完整性 | `SnowLuma-v1.14.20-win-x64-lite.zip` SHA256 == 官方发布资产 `digest` |
-| **原生组件跨版本未变** | 官方 1.14.9 包 == 本机 1.14.9 == 官方 1.14.20，`native/snowluma-win32-x64.{dll,node}` 与 `websocket-win32-x64.node` **逐字节相同**；`index.mjs` 7,062,899 → 7,476,546 B |
-| 配置迁移无损 | 桥接的 `readOneBotTokens()` 在新装目录解析出两个账号，HTTP/WS token 与旧装**逐一相同** |
-| 心跳主信号仍成立 | `status = {"online":true,"good":true}`、`interval = 30000` |
-| `bot_status` 真的出现了 | 1.14.9：**0** 次；1.14.20：**3** 次（带 `sub_type`/`user_id`） |
-| 桥接连通 | 走完「首次 1006 → 自愈 WS token → 已连接」；`/api/status.snowluma` 给出 `good:true`、**`goodSource:"heartbeat"`** |
-| 收到 QQ 消息 | `lastPacketKind: message/group`；静默态下正确「仅入库不唤醒」 |
-| **完整往返** | 唤醒 → DSH 建会话并挂 `qq-chat-v2` → 工具发送 `成功 1/1 条` → 群里实际出现两条回复 |
-
-> ⚠️ **更正**：本附录 A 一度暗示「升级 SnowLuma 可能修注入（1.14.17 刷新过原生组件）」。
-> 字节级证据表明**原生组件根本没有变**，那条推断是错的。升级只换 JS 层
-> （事件流水线订阅更全、`bot_status`、markdown 带 text、收发修复），
-> **不会修「原生 hook 挂不上 QQ」**——那类问题要走 SnowLuma 自己的排查（QQ 版本、杀软拦注入、权限）。
+> 移植到 Discord 时，依赖外部语音工具的那批测试与 `scripts/voice-tool-locator.mjs` 已一起删除，本节只作历史记录。
 
 ### H. 版本号方案（自本版起）
 
@@ -489,7 +413,7 @@ SnowLuma 同一账号的 **HTTP token（3000）与 WS token（3001）不同**，
 | --- | --- |
 | `v0.2.0` | r1 —— DSH 0.2.0-rc.2 适配 |
 | ~~`v0.2.1`~~ | r2 —— 采用本方案**之前**的一次性发布：标签与 Release **已撤回**（提交 `9bb7b98` 仍在历史里）。本节全部内容都包含在 r3 中，撤回无功能影响。撤回理由：它不符合「主版本与 DSH 同步」的方案，且发布仅约 26 分钟、无二进制资产、无下游依赖，改写代价为零；留着则每次看标签列表都要额外解释一次 |
-| `v0.2.0-r3` | r3 —— 上游健康 + 客户端库升级 + clone 可移植性 + 1.14.20 实测 |
+| `v0.2.0-r3` | r3 —— 上游健康 + 客户端库升级 + clone 可移植性 + 运行时实测 |
 | `v0.2.0-r4` | r4 —— 表情包/动图链路、DSH 同源联网搜索、issue 修复、整体体检（见附录 J） |
 | `v0.2.1-r1` | r1（0.2.1 线）—— **当前版本**：DSH 0.2.1-rc.2 适配，P0 `{{cwd}}` 提示词变量修复 + 工具面守卫补齐（见 [DSH_021_ADAPTATION.md](DSH_021_ADAPTATION.md)）。用 `-r1` 而不是裸 `v0.2.1`：那个标签已被上表撤回的 r2 占用过 |
 
@@ -498,13 +422,13 @@ SnowLuma 同一账号的 **HTTP token（3000）与 WS token（3001）不同**，
 
 ### I. r3 时**未**修、r4 已修的问题
 
-工具流水里 `mcp__snowluma__qq_wait_for_messages` 出现过 `ok:false` 且
+工具流水里平台 MCP 的长轮询等消息工具（现为 `mcp__discord__chat_wait_for_messages`）出现过 `ok:false` 且
 `error: "\"Error: [object Object]\""`（2026-09-28、2026-10-03 各一次）。错误对象被 `String()` 成了
 `[object Object]`，**运维与智能体都看不到任何信息**。
 
 r4 已修：MCP 侧统一走 `errorText()`（对象 → `JSON.stringify` 或取 `message`，限长 500），
 两条传输通道（普通 fetch 与长轮询）与两个图片工具都用它；并补了「对象形态的 error 必须可读」的回归。
-同轮还把 `qq_wait_for_messages` 整体改走 `node:http` 长轮询，绕开 undici 的 300 秒 `headersTimeout`
+同轮还把这个等消息工具整体改走 `node:http` 长轮询，绕开 undici 的 300 秒 `headersTimeout`
 （见附录 J）。
 
 ---
@@ -522,20 +446,19 @@ r4 已修：MCP 侧统一走 `errorText()`（对象 → `JSON.stringify` 或取 
 
 ## 附：v0.2.0-r4 主要改动
 
-> 完整版见 [Release v0.2.0-r4](https://github.com/Derpyu520/qq-bridge/releases/tag/v0.2.0-r4)。
+> 完整版见上游仓库（Derpyu520）的 Release v0.2.0-r4（移植前）。
 > 本附录只记录「改了什么 / 为什么」的要点，便于在仓库内追溯。
 
 ### J.1 图片/表情（含动图）链路
 
-**根因**：QQ 表情 CDN（`gxh.vip.qq.com` / `p.qpic.cn` / `multimedia.nt.qq.com.cn`）的 DNS 应答里
+**根因**：当时平台的表情 CDN 的 DNS 应答里
 AAAA 排在 A 前面，而本机没有 IPv6 出口；旧 `safe-fetch` 只取 `addresses[0]` 并钉死连接 ——
 抢到 AAAA 的那次请求白等 20 秒超时，DNS 顺序又是轮转的，于是表现为「**部分**表情/图片时好时坏」。
 
 - `safe-fetch`：全部解析结果校验后按 **IPv4 优先、两族交替**排序；多地址时逐地址尝试
   （单次 8s、最多 4 个、总预算 20s），仅网络层失败才换地址。
-- 表情包：解析保留 `emoji_id`/`summary`/`sub_type`（含 `mface` 段）；**表情优先走 CDN**
-  （市场表情不在网关缓存，`get_image` 必失败），无 URL 时用 `emoji_id`（或文件名里的 32 位 hex）
-  推出 `gxh.vip.qq.com/.../raw300.gif` 兜底。
+- 表情包：解析保留表情 id / 摘要 / 子类型；**表情优先走 CDN**，无 URL 时按表情 id 推出兜底地址。
+  （移植到 Discord 时这条兜底已随旧平台的消息段一起删除。）
 - 落库（`appendSocialV2Message`）不再丢 `kind`/`emojiId`/`summary`/`subType`；`summary` 单行化并限长 60。
 - 单条媒体上限：8MB / 64MP / 5 张（`socialV2.media` 可调）。
 
@@ -557,11 +480,10 @@ Bing **RSS** 仅作兜底；5 分钟查询缓存；空结果显式 `note`。安�
   否则控制台切的模式会被 5 秒轮询改回去）。
 - 回合判忙改为「起始时间 + 15 分钟租约」：无起始时间的残留 collector 不再永久 busy；
   `rebuildInFlightCollector` 补起始时间；learner collector 同型修复；busy 日志带原因。
-- `qq_wait_for_messages` 改走 `node:http` 长轮询（undici 默认 300s headersTimeout 会让
+- 等消息工具改走 `node:http` 长轮询（undici 默认 300s headersTimeout 会让
   5 分钟沉睡前观察必然失败）；错误对象统一 `errorText()` 可读。
-- DSH 控制调用（停任务/归档/列会话）全部 15s 超时；事件流重连指数退避 + 「已结束」日志；
-  SnowLuma `error` 事件也触发 token 自愈。
-- 机器人身份（昵称 + QQ 号）注入唤醒 prompt、收尾提醒与 `qq_get_prompt`。
+- DSH 控制调用（停任务/归档/列会话）全部 15s 超时；事件流重连指数退避 + 「已结束」日志。
+- 机器人身份（昵称 + 用户 id）注入唤醒 prompt、收尾提醒与取提示词工具（现为 `chat_get_prompt`）。
 
 ### J.4 体检修复
 

@@ -2392,7 +2392,7 @@ button:active:not(:disabled) {
       <div class="meta">由本桥接的 MCP server 提供给 DSH agent；修改后需重启 DSH 才会刷新工具 schema。</div>
       <table>
         <tr><th>工具</th><th>说明</th></tr>
-        <tr><td>chat_get_group_members</td><td>群成员（只读，群 id 必须白名单）</td></tr>
+        <tr><td>chat_get_group_members</td><td>频道成员（只读，频道 id 必须白名单）</td></tr>
         <tr><td>chat_send_group_message</td><td>发群消息；可选 <code>replyToMessageId</code> 引用/回复</td></tr>
         <tr><td>chat_reply</td><td>专用“引用/回复”：在群里引用某条消息并发送文本</td></tr>
         <tr><td>chat_send_private_message</td><td>发私聊；可选 <code>replyToMessageId</code> 引用/回复</td></tr>
@@ -2403,14 +2403,14 @@ button:active:not(:disabled) {
     </section>
 <section id="section-whitelist" data-page="access" class="card span-all">
       <h2>白名单 / 管理员</h2>
-      <label>允许的群 id（逗号分隔）</label>
-      <input type="text" id="wlGroups" placeholder="123456789, 123456">
+      <label>允许的频道 id（逗号分隔）</label>
+      <input type="text" id="wlGroups" placeholder="123456789012345678, 234567890123456789">
       <label>允许的私聊用户 id（逗号分隔）</label>
-      <input type="text" id="wlPrivate" placeholder="123456789">
+      <input type="text" id="wlPrivate" placeholder="123456789012345678">
       <label>管理员 id（ownerId，最高权限）</label>
-      <input type="text" id="ownerId" placeholder="123456789">
+      <input type="text" id="ownerId" placeholder="123456789012345678">
       <div class="meta">管理员是唯一可执行管理命令/审批/closed-agent 的用户；可留空清除（清除后无管理员，fail-closed）。</div>
-      <label>拒绝的群 id（黑名单，逗号分隔）</label>
+      <label>拒绝的频道 id（黑名单，逗号分隔）</label>
       <input type="text" id="dnGroups" placeholder="">
       <label>拒绝的私聊用户 id（黑名单，逗号分隔）</label>
       <input type="text" id="dnPrivate" placeholder="">
@@ -2475,7 +2475,7 @@ button:active:not(:disabled) {
           <option value="group">群</option>
           <option value="private">私聊</option>
         </select>
-        <input type="text" id="tsId" placeholder="群 id / 用户 id" style="width:140px">
+        <input type="text" id="tsId" placeholder="频道 id / 用户 id" style="width:140px">
       </div>
       <label>消息内容</label>
       <textarea id="tsMsg" placeholder="这是一条测试消息"></textarea>
@@ -2505,7 +2505,7 @@ button:active:not(:disabled) {
           <option value="group">群</option>
           <option value="private">私聊</option>
         </select>
-        <input type="text" id="aiNotifyId" placeholder="群 id / 用户 id" style="width:180px">
+        <input type="text" id="aiNotifyId" placeholder="频道 id / 用户 id" style="width:180px">
       </div>
       <label>提醒内容（发给 DSH agent 的引导/提醒）</label>
       <textarea id="aiNotifyMessage" placeholder="例如：接下来群里聊到某个话题时，你可以更主动一点；或：先潜水，等我叫你。"></textarea>
@@ -3135,7 +3135,7 @@ document.getElementById('aiNotifySend').addEventListener('click', async () => {
   const kind = document.getElementById('aiNotifyKind').value;
   const id = document.getElementById('aiNotifyId').value.trim();
   const message = document.getElementById('aiNotifyMessage').value.trim();
-  if (!id || !message) { alert('请填写群 id / 用户 id 和提醒内容'); return; }
+  if (!id || !message) { alert('请填写频道 id / 用户 id 和提醒内容'); return; }
   const r = await api('/api/console/notify-ai', 'POST', { key: kind + ':' + id, message });
   const msg = document.getElementById('aiNotifyMsg');
   msg.textContent = r.ok ? ('✅ 已投递到 DSH：' + r.sessionId) : ('❌ ' + (r.error || '失败'));
