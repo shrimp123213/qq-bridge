@@ -5,15 +5,16 @@
 //      config 里带 id/name/description/order/plugins；
 //   3. 守卫行只能用「从 profile 目录可解析」的引用方式（裸说明符），
 //      不允许任何相对/绝对路径子行名 —— 那正是 0.1.7 下静默装不上的坑；
-//   4. 安全边界（qq-tool-restrict 的 fail-closed 白名单）一份实现、两个 preset 共用。
+//   4. 安全边界（qq-tool-restrict 的 fail-closed 白名单）一份实现、所有 preset 共用；
+//   5. 派生 preset（dc-chat-v2）的行列表与 base 相同，只有人格正文按 derive.yml 改写。
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import yaml from 'js-yaml';
 import {
-  BUNDLE_DIR, GUARD_SPECIFIER, PRESETS, REPO_ROOT,
-  buildPatches, patchFileFor, presetRowId,
+  ALL_PRESETS, BUNDLE_DIR, DERIVED_PRESETS, GUARD_SPECIFIER, PRESETS, REPO_ROOT,
+  buildPatches, derivePersonaPrefix, patchFileFor, presetRowId,
 } from './build-agent-preset-patches.mjs';
 
 let failures = 0;
@@ -62,8 +63,41 @@ for (const name of PRESETS) {
     `${name}: persona.prefix 逐字一致（${srcPersona?.config?.prefix?.length ?? 0} 字符）`);
 }
 
+console.log('## 2b. 派生 preset：行列表照搬 base，只改写人格正文');
+for (const name of DERIVED_PRESETS) {
+  const dir = path.join(REPO_ROOT, 'dsh', 'agent-presets', name);
+  const spec = load(path.join(dir, 'derive.yml'));
+  ok(PRESETS.includes(spec?.base), `${name}: derive.yml 的 base（${spec?.base}）是源 preset`);
+  ok(!fs.existsSync(path.join(dir, 'agent.cordis.yml')), `${name}: 没有自己的 agent.cordis.yml（正文只在 base 维护）`);
+  const row = load(patchFileFor(name))[0].insert[0];
+  ok(row.id === presetRowId(name) && row.name === '@deepseek-ai/dsh-agent-preset' && row.config?.id === name,
+    `${name}: 行 id/name/config.id 形状同源 preset`);
+  const meta = load(path.join(dir, 'preset.yml'));
+  ok(row.config.name === meta.name && row.config.description === meta.description && row.config.order === meta.order,
+    `${name}: 自己 preset.yml 的 name/description/order 带进 config`);
+
+  const baseRow = load(patchFileFor(spec.base))[0].insert[0];
+  const basePrefix = baseRow.config.plugins.find((r) => r.id === 'persona').config.prefix;
+  const prefix = row.config.plugins.find((r) => r.id === 'persona')?.config?.prefix;
+  const withoutPrefix = (plugins) => plugins.map((r) => (r.id === 'persona' ? { ...r, config: { ...r.config, prefix: null } } : r));
+  assert.deepEqual(withoutPrefix(row.config.plugins), withoutPrefix(baseRow.config.plugins), `${name}: 除 persona.prefix 外必须与 ${spec.base} 完全一致`);
+  ok(true, `${name}: 除 persona.prefix 外与 ${spec.base} 逐字一致（含安全守卫，${row.config.plugins.length} 行）`);
+  ok(prefix === derivePersonaPrefix(basePrefix, spec, name), `${name}: persona.prefix = derive.yml 规则作用于 ${spec.base} 的结果`);
+  ok(prefix !== basePrefix, `${name}: 人格正文确实被改写`);
+}
+{
+  // 规则对不上必须报错，不能悄悄产出改了一半的提示词。
+  const sample = '【协议】 1. 【甲】说明甲 2. 【乙】说明乙 3. 【丙】说明丙\n尾段';
+  assert.equal(derivePersonaPrefix(sample, { removeItems: ['【乙】'] }), '【协议】 1. 【甲】说明甲 2. 【丙】说明丙\n尾段');
+  ok(true, 'derivePersonaPrefix 删除条目后同段重新编号');
+  assert.throws(() => derivePersonaPrefix(sample, { removeItems: ['【丁】'] }), /应恰好出现 1 次/);
+  assert.throws(() => derivePersonaPrefix(sample, { replace: [{ from: '不存在', to: 'x' }] }), /应恰好出现 1 次/);
+  assert.throws(() => derivePersonaPrefix(sample, { replace: [{ from: '说明', to: 'x' }] }), /应恰好出现 1 次/);
+  ok(true, 'derivePersonaPrefix 遇到找不到/不唯一的规则直接抛错');
+}
+
 console.log('## 3. 守卫行引用方式：只用「profile 目录可解析」的裸说明符');
-for (const name of PRESETS) {
+for (const name of ALL_PRESETS) {
   const row = load(patchFileFor(name))[0].insert[0];
   const guard = row.config.plugins.find((r) => r.id === 'qq-tool-restrict');
   ok(guard !== undefined, `${name}: 有 qq-tool-restrict 守卫行`);
@@ -79,7 +113,7 @@ console.log('## 4. bundle 声明与安全边界');
   const pkg = JSON.parse(read(path.join(BUNDLE_DIR, 'package.json')));
   const patches = pkg.dsh?.bundle?.patch;
   ok(Array.isArray(patches), 'qq-agent-presets 的 dsh.bundle.patch 是数组（一个 bundle 可带多层 patch）');
-  for (const name of PRESETS) {
+  for (const name of ALL_PRESETS) {
     const declared = `./presets/${name}.patch.yml`;
     ok(patches?.includes(declared), `bundle 列出了 ${declared}`);
     ok(fs.existsSync(path.join(BUNDLE_DIR, declared)), `${declared} 存在`);

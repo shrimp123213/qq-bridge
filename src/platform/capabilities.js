@@ -49,3 +49,14 @@ export function platformSupportsTool(platform, toolName) {
 export function platformHasStickerLibrary(platform) {
   return platformSupportsToolFlag(platform, 'listStickers');
 }
+
+// 同一模式在不同平台用的 DSH preset：Discord 版由 build-agent-preset-patches.mjs 从 QQ 版派生，
+// 只去掉 Discord 没有的工具说明、换掉 QQ 用语，安全守卫行完全相同。不在表里的照用原名。
+const PLATFORM_PRESETS = {
+  discord: { 'qq-chat-v2': 'dc-chat-v2' },
+};
+
+/** 按平台换成对应的 preset 名（配置里写的仍是 QQ 版的名字）。 */
+export function platformPreset(platform, preset) {
+  return PLATFORM_PRESETS[platform]?.[preset] ?? preset;
+}

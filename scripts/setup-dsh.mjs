@@ -19,7 +19,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
-import { BUNDLE_DIR, PRESETS, buildPatches, patchFileFor } from './build-agent-preset-patches.mjs';
+import { ALL_PRESETS, BUNDLE_DIR, PRESETS, buildPatches, patchFileFor } from './build-agent-preset-patches.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -91,7 +91,7 @@ function regeneratePresetPatches() {
   for (const { file, changed } of results) {
     log(`preset patch ${changed ? '已生成' : '已是最新'}: ${path.relative(REPO_ROOT, file)}`);
   }
-  for (const name of PRESETS) {
+  for (const name of ALL_PRESETS) {
     const file = patchFileFor(name);
     if (!fs.existsSync(file)) fatal(`preset patch 未生成：${file}`);
   }

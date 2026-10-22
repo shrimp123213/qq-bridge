@@ -12,6 +12,9 @@
 //          本脚本是两者之间**唯一**的转换器：源是唯一权威，产物是纯生成物（文件头写明「请勿手工编辑」）。
 //          setup-dsh.mjs 在安装时会重新生成；test-agent-preset-patches.mjs 用 --check 钉住不漂移。
 //
+//   派生 preset（DERIVED_PRESETS）：没有自己的 agent.cordis.yml，按 dsh/agent-presets/<preset>/derive.yml
+//   从 base preset 生成——行列表照搬，只按规则改写人格正文（例如二代的 Discord 版去掉 Discord 没有的工具）。
+//
 // 用法：
 //   node scripts/build-agent-preset-patches.mjs           # 生成/刷新 patch 文件
 //   node scripts/build-agent-preset-patches.mjs --check    # 只校验产物与源一致（不一致 exit 1）
@@ -23,8 +26,14 @@ import yaml from 'js-yaml';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
 
-/** 由桥接托管的两个 preset（顺序即 patch 层顺序）。 */
+/** 由桥接托管、有自己源目录的两个 preset（顺序即 patch 层顺序）。 */
 export const PRESETS = ['qq-chat', 'qq-chat-v2'];
+
+/** 派生 preset：源目录里只有 preset.yml + derive.yml，正文由 base 生成。 */
+export const DERIVED_PRESETS = ['dc-chat-v2'];
+
+/** 全部要生成 patch 的 preset（顺序即 patch 层顺序）。 */
+export const ALL_PRESETS = [...PRESETS, ...DERIVED_PRESETS];
 
 /** preset 行 id：与 config.id（桥接解析的 preset 名）区分开，方便在 profile patch 里按行定位。 */
 export function presetRowId(name) {
@@ -109,15 +118,95 @@ function normalizeRows(rows, preset) {
   return normalized;
 }
 
-/** 渲染一个 preset 的 patch 文件内容。 */
-export function renderPatch(name) {
+// 段内编号条目的形状：「【段标题】 1. … 2. …」（YAML 折叠后，同一段的条目以空格相连）。
+// 按 1、2、3… 依次找「 N. 」，正文里偶然出现的数字不会被当成条目。
+function splitNumberedItems(paragraph) {
+  const starts = [];
+  let from = 0;
+  for (let n = 1; ; n += 1) {
+    const at = paragraph.indexOf(` ${n}. `, from);
+    if (at < 0) break;
+    starts.push(at);
+    from = at + ` ${n}. `.length;
+  }
+  if (starts.length === 0) return null;
+  return {
+    head: paragraph.slice(0, starts[0]),
+    items: starts.map((at, i) => paragraph.slice(at + ` ${i + 1}. `.length, starts[i + 1] ?? paragraph.length)),
+  };
+}
+
+function joinNumberedItems({ head, items }) {
+  return head + items.map((text, i) => ` ${i + 1}. ${text}`).join('');
+}
+
+/**
+ * 按 derive.yml 的规则改写 base 的 persona.prefix：先整条删除编号条目（同一段重新编号），再逐字替换。
+ * 任何一条规则对不上都抛错，不产出改了一半的提示词。
+ */
+export function derivePersonaPrefix(prefix, { removeItems = [], replace = [] } = {}, label = 'derive') {
+  const paragraphs = String(prefix).split('\n');
+  for (const title of removeItems) {
+    let hits = 0;
+    for (let p = 0; p < paragraphs.length; p += 1) {
+      const parsed = splitNumberedItems(paragraphs[p]);
+      if (!parsed) continue;
+      const kept = parsed.items.filter((text) => !text.startsWith(title));
+      if (kept.length === parsed.items.length) continue;
+      hits += parsed.items.length - kept.length;
+      paragraphs[p] = joinNumberedItems({ head: parsed.head, items: kept });
+    }
+    if (hits !== 1) throw new Error(`${label}: 要删除的条目 ${title} 应恰好出现 1 次，实际 ${hits} 次（base 的条目标题改了？）`);
+  }
+  let text = paragraphs.join('\n');
+  for (const { from, to } of replace) {
+    const count = text.split(from).length - 1;
+    if (count !== 1) throw new Error(`${label}: 替换源「${from}」应恰好出现 1 次，实际 ${count} 次（base 的措辞改了？）`);
+    text = text.replace(from, () => to);
+  }
+  return text;
+}
+
+function readDeriveSpec(name) {
+  const spec = readYaml(path.join(sourceDirFor(name), 'derive.yml'));
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) throw new Error(`${name}: derive.yml 必须是映射`);
+  if (!PRESETS.includes(spec.base)) throw new Error(`${name}: derive.yml 的 base 必须是 ${PRESETS.join(' / ')} 之一`);
+  const removeItems = spec.removeItems ?? [];
+  const replace = spec.replace ?? [];
+  if (!Array.isArray(removeItems) || removeItems.some((title) => typeof title !== 'string' || title === '')) {
+    throw new Error(`${name}: derive.yml 的 removeItems 必须是非空字符串列表`);
+  }
+  if (!Array.isArray(replace) || replace.some((r) => typeof r?.from !== 'string' || r.from === '' || typeof r?.to !== 'string')) {
+    throw new Error(`${name}: derive.yml 的 replace 每项必须是 { from, to } 字符串`);
+  }
+  return { base: spec.base, removeItems, replace };
+}
+
+/**
+ * 读一个 preset 的元数据与行列表：源 preset 直接读 agent.cordis.yml；
+ * 派生 preset 照搬 base 的行列表，只改写 persona.prefix。
+ */
+export function presetSource(name) {
   const dir = sourceDirFor(name);
   const meta = readYaml(path.join(dir, 'preset.yml'));
   if (!meta || typeof meta !== 'object' || Array.isArray(meta)) throw new Error(`${name}: preset.yml 必须是映射`);
   for (const field of ['name', 'description', 'order']) {
     if (meta[field] === undefined) throw new Error(`${name}: preset.yml 缺少 ${field}`);
   }
-  const plugins = normalizeRows(readYaml(path.join(dir, 'agent.cordis.yml')), name);
+  if (!DERIVED_PRESETS.includes(name)) {
+    return { meta, plugins: normalizeRows(readYaml(path.join(dir, 'agent.cordis.yml')), name), base: null };
+  }
+  const spec = readDeriveSpec(name);
+  const plugins = normalizeRows(readYaml(path.join(sourceDirFor(spec.base), 'agent.cordis.yml')), name);
+  const persona = plugins.find((row) => row.id === 'persona');
+  if (typeof persona?.config?.prefix !== 'string') throw new Error(`${name}: base ${spec.base} 的 persona 行没有 prefix`);
+  persona.config = { ...persona.config, prefix: derivePersonaPrefix(persona.config.prefix, spec, name) };
+  return { meta, plugins, base: spec.base };
+}
+
+/** 渲染一个 preset 的 patch 文件内容。 */
+export function renderPatch(name) {
+  const { meta, plugins, base } = presetSource(name);
   const row = {
     id: presetRowId(name),
     name: '@deepseek-ai/dsh-agent-preset',
@@ -131,7 +220,9 @@ export function renderPatch(name) {
   };
   const header = [
     `# 本文件由 scripts/build-agent-preset-patches.mjs 生成，请勿手工编辑。`,
-    `# 源：dsh/agent-presets/${name}/preset.yml + agent.cordis.yml（人格正文与工具面都在那里改）。`,
+    base
+      ? `# 源：dsh/agent-presets/${base}/agent.cordis.yml，人格正文按 dsh/agent-presets/${name}/derive.yml 改写（正文请改 ${base}）。`
+      : `# 源：dsh/agent-presets/${name}/preset.yml + agent.cordis.yml（人格正文与工具面都在那里改）。`,
     `# 作用：把 ${name} 作为一条 @deepseek-ai/dsh-agent-preset 行插入 profile（DSH 0.1.7+ 的 preset 机制）。`,
     `# 守卫行 qq-tool-restrict 用裸说明符 ${GUARD_SPECIFIER}：子行 name 按 profile 目录解析，`,
     `# 该包以 link: 依赖注册在 profile package.json（node_modules junction 由 setup-dsh.mjs 维护）。`,
@@ -144,7 +235,7 @@ export function renderPatch(name) {
 /** 生成（或校验）全部 patch 文件。@returns {{file:string,changed:boolean}[]} */
 export function buildPatches({ check = false, log = () => {} } = {}) {
   const results = [];
-  for (const name of PRESETS) {
+  for (const name of ALL_PRESETS) {
     const file = patchFileFor(name);
     const content = renderPatch(name);
     const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;

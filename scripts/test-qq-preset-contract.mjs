@@ -103,4 +103,31 @@ test('autonomy limits and the observation escape hatch stay described', () => {
   ]) assert.ok(prefix.includes(text), `missing rule: ${text}`);
 });
 
+test('the Discord variant drops tools Discord lacks and keeps the shared protocol', () => {
+  // dc-chat-v2 由 build-agent-preset-patches.mjs 从本预设派生（见 dc-chat-v2/derive.yml），这里读生成的 patch。
+  const patch = yaml.load(fs.readFileSync(
+    new URL('../plugins/qq-agent-presets/presets/dc-chat-v2.patch.yml', import.meta.url), 'utf8',
+  ));
+  const dcPrefix = patch[0].insert[0].config.plugins.find((row) => row.id === 'persona')?.config?.prefix ?? '';
+  // 这些工具在 Discord 不注册（src/platform/capabilities.js），留着说明只会诱导模型去调。
+  for (const text of [
+    'chat_send_poke', 'chat_get_forward_msg', 'nestedForwardIds', 'chat_list_stickers', 'chat_get_sticker_image',
+    'chat_send_sticker', 'chat_collect_sticker', 'chat_sticker_note', 'chat_set_sticker_remark',
+    '拍一拍', '斗图', '[转发消息', '群名片', '语音条', 'QQ',
+  ]) assert.ok(!dcPrefix.includes(text), `Discord prompt still mentions: ${text}`);
+  for (const text of [
+    '{{model}}', '不会自动发送到聊天', '作为 token 参数传入', 'triggers.speakerIds', '不凭记忆乱填', '不要用 [SILENT]',
+    'chat_send_message', 'chat_get_prompt', 'chat_wait_for_messages', 'chat_mark_read', 'chat_set_wake_config',
+    'chat_get_message_images', 'chat_get_self_image', 'chat_list_voices', 'chat_send_voice', '不要假装发了语音',
+    'chat_memory_append', 'chat_slang_query', '【记忆卫生】', '【反 AI 味：拒绝有求必应】',
+    '除非对方明确“不聊了/晚安/下了/拜拜”等结束语', '改服务器昵称', '【Discord 场景规则】', '不要用 Markdown 排版',
+    'mcp__web-search-safe__web_search', 'mcp__web-search-safe__web_fetch',
+  ]) assert.ok(dcPrefix.includes(text), `Discord prompt is missing: ${text}`);
+  // 删掉条目后工具协议仍从 1 连续编号，不留空号。
+  const protocol = dcPrefix.split('\n').find((p) => p.startsWith('【二代仿真模式 —— 工具协议'));
+  const numbers = [...protocol.matchAll(/ (\d+)\. /g)].map((m) => Number(m[1]));
+  assert.deepEqual(numbers, numbers.map((_, i) => i + 1));
+  assert.ok(numbers.length < prefix.split('\n').find((p) => p.startsWith('【二代仿真模式 —— 工具协议')).match(/ \d+\. /g).length);
+});
+
 console.log(`reserved2 persona prefix: ${prefix.length} characters (not a model-token estimate)`);
