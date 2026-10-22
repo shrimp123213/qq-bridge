@@ -4,6 +4,8 @@
 //   QQ 消息 → SnowLuma (OneBot v11 WS) → 本进程 → DSH Web API session.prompt
 //   DSH agent 回复/提问/审批 → events.mux 事件流 → 本进程 → send_msg → QQ
 //
+// 与聊天平台的收发全部经 src/platform/qq-onebot.js（平台适配层），本文件不直接碰 SnowLuma。
+//
 // 用法：node src/bridge.js （先编辑 ../config.json）
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,7 +17,7 @@ import yaml from 'js-yaml';
 import { extractPresetPrefix, presetPromptBlockers, presetPromptWarnings, renderPresetPromptYaml } from './preset-prompt.js';
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
-import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
+import { createQQPlatform } from './platform/qq-onebot.js';
 import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from './dsh-client.js';
 import { mdToPlain, splitForQQ, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
@@ -24,7 +26,6 @@ import { compactModelMessage, describeAge } from './qq-model-view.js';
 import { safeFetchBuffer, looksLikeImageBuffer } from './safe-fetch.js';
 import { normalizeImageForModel } from './media-normalize.js';
 import { AUDIO_EXTS, cleanupTemp, describeAudio, formatBytes, formatDuration, inspectAudio, listAudioFiles, parseTargetKey, processAudioVolume, resolveAudioProcessing, resolveAudioSource, safeJoinLibrary } from './send-voice-lib.js';
-import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } from './snowluma-conn.js';
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 import { extractForwardIds, forwardIdFromData, sanitizeForwardId, formatForwardResponse } from './forward.js';
 import { resolvePriceTable } from './model-prices.js';
@@ -595,11 +596,6 @@ function redactSensitiveText(text) {
     if (token && raw.includes(token)) raw = raw.split(token).join('***');
   }
   return raw;
-}
-
-// 防止底层网关把文本中的 [CQ: 当作 CQ 码解析：替换为全角冒号。
-function escapeCqText(text) {
-  return String(text ?? '').replace(/\[CQ:/gi, '[CQ：');
 }
 
 // 兼容模型把单条消息序列化成 JSON 字符串的情况，例如 "\"你好\"" → "你好"。
@@ -1389,6 +1385,9 @@ async function main() {
   acquireLock();
   loadState();
 
+  // 聊天平台（QQ / SnowLuma）适配层：所有收发与查询都经它，start() 在 main() 末尾才连接。
+  const platform = createQQPlatform({ cfg, log, configPath: path.join(ROOT, 'config.json') });
+
   // ── 群聊黑话/网络用语学习（slang） ──────────────────────────────────────
   let slangEntries = [];
   // 读失败时（被占用 / 权限 / JSON 损坏）必须**暂停写入**：否则内存里的空数组
@@ -1435,35 +1434,8 @@ async function main() {
     try { saveStickerStore(STICKER_FILE, stickerEntries); } catch (error) { log('保存表情库失败:', error?.message ?? error); }
   }
 
-  // 从 SnowLuma OneBot 拉取 QQ 账号收藏表情（fetch_custom_face_detail），并合并进本地库。
-  // ── 读接口的 HTTP 兜底：WS 挂了不等于网关挂了 ──────────────────────────────
-  //
-  // 为什么要有：`fetch_custom_face_detail` 原来只走 SnowLuma 的 WS action，于是
-  // 「WS 正在重连」这段时间里表情库同步必然失败。日志实测 33 次同步里 16 次失败（≈48%），
-  // 全是 `SnowLuma WebSocket closed before opening`；表现就是操作者说的
-  // 「有时读群友的表情包会失败」——库里没有新收藏 ⇒ qq_get_sticker_image 直接报「找不到表情」。
-  //
-  // 而**同一个网关的 HTTP 口一直是可用的**（onebotSend 发消息、fetch_ptt_text 转写都直接用它）。
-  // 读接口没有理由单点依赖 WS。这里只在 WS 失败时兜底，不改变正常路径的延迟。
-  async function onebotHttpAction(action, params = {}, { timeoutMs = 15000 } = {}) {
-    const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-    const res = await fetch(`${httpUrl}/${action}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-      },
-      body: JSON.stringify(params ?? {}),
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || body.status !== 'ok' || body.retcode !== 0) {
-      const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口）' : '';
-      throw new Error(`OneBot HTTP ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
-    }
-    return body;
-  }
-
+  // 从平台拉取 QQ 账号收藏表情（fetch_custom_face_detail），并合并进本地库。
+  // WS 失败时改走 OneBot HTTP 的兜底在适配层里（platform.fetchStickerLibrary）。
   // force=true 时忽略 TTL 强制刷新；失败时返回 null（调用方决定是否使用缓存）。
   async function syncStickerLibrary(force = false) {
     if (cfg.socialV2?.sticker?.enabled === false) return null;
@@ -1475,19 +1447,7 @@ async function main() {
     }
     try {
       const count = Math.min(500, Math.max(1, Number(cfg.socialV2?.sticker?.maxListCount) || 100));
-      let response;
-      let via = 'ws';
-      try {
-        response = await bot.request('fetch_custom_face_detail', { count });
-        if (!response || response.status !== 'ok' || response.retcode !== 0) {
-          throw new Error(`fetch_custom_face_detail 失败: ${response?.wording || response?.retcode || 'unknown'}`);
-        }
-      } catch (wsError) {
-        // WS 失败 ⇒ 立刻用 HTTP 再问一次同一个 action（语义相同，token 可能不同但同一账号）。
-        log(`[sticker] WS 同步不可用（${wsError?.message ?? wsError}），改走 OneBot HTTP 兜底`);
-        response = await onebotHttpAction('fetch_custom_face_detail', { count });
-        via = 'http';
-      }
+      const { response, via } = await platform.fetchStickerLibrary(count);
       // 只有拿到合法数组才允许合并；data 缺失/异常时不能拿空数组清空本地 QQ 表情库。
       if (!Array.isArray(response.data)) {
         throw new Error('fetch_custom_face_detail 返回 data 不是数组，已放弃同步');
@@ -1751,35 +1711,15 @@ async function main() {
 
     const assertSendAllowed = guard ? captureSendGuard(key) : null;
     const [kind, id] = key.split(':');
-    const recordSegment = { type: 'record', data: { file: sendPath } };
     let resolveSend;
     let rejectSend;
     const sendPromise = new Promise((resolve, reject) => { resolveSend = resolve; rejectSend = reject; });
     sendChain = sendChain.then(async () => {
       try {
         if (assertSendAllowed) assertSendAllowed();
-        // 语音条比图片大、要过一次 SILK 转码，给 60s 预算（文本/图片共用同一 sendChain，
-        // 所以这条语音发完之前后面的文本会自然排队，不会插队到语音前面）。
-        const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-        const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
-        const params = kind === 'private'
-          ? { user_id: Number(id), message: [recordSegment] }
-          : { group_id: Number(id), message: [recordSegment] };
-        const res = await fetch(`${httpUrl}/${action}`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-          },
-          body: JSON.stringify(params),
-          signal: AbortSignal.timeout(60000)
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || body.status !== 'ok' || body.retcode !== 0) {
-          const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口）' : '';
-          throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
-        }
-        resolveSend(body.data);
+        // 文本/图片共用同一 sendChain，所以这条语音发完之前后面的文本会自然排队，
+        // 不会插队到语音前面（语音的 60s 发送预算在适配层里）。
+        resolveSend(await platform.sendVoice(kind, id, sendPath));
       } catch (error) {
         rejectSend(error);
       }
@@ -1829,38 +1769,14 @@ async function main() {
   }
 
   /**
-   * 发完语音后的**落地验证**：把这条消息从网关读回来，确认它真的带着 record 段。
-   *
-   * 为什么不用 fetch_ptt_text 做这件事：那个动作依赖 QQ 侧的语音转写结果，
-   * 而**自己发出去的**语音根本不会产生转写（实测 retcode=100「消息中不包含语音」）。
-   * 想让 AI 确认「语音真的发出去了」，唯一可靠的证据是 get_msg 回读到的 record 段。
-   * 返回 { confirmed, file, duration } 或 null（读不回来不影响"已发送"这个事实）。
+   * 发完语音后的**落地验证**：把这条消息从平台读回来，确认它真的是一条语音
+   * （QQ 的做法与原因见 platform.confirmVoiceSent）。
+   * 返回 { confirmed, duration } 或 null（读不回来不影响"已发送"这个事实）。
    */
   async function verifyVoiceMessageSent(messageId) {
     if (!messageId) return null;
     try {
-      const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-      const res = await fetch(`${httpUrl}/get_msg`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-        },
-        body: JSON.stringify({ message_id: Number(messageId) }),
-        signal: AbortSignal.timeout(30000)
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body.status !== 'ok' || body.retcode !== 0) return null;
-      const segments = Array.isArray(body.data?.message) ? body.data.message : [];
-      const record = segments.find((s) => s?.type === 'record');
-      if (!record) return null;
-      // 注意：只回报「确认成功 + 时长」，**不回传 file/url**。
-      // 私聊消息里 get_msg 会把源文件路径塞进 url（如 D:\...\audio\xxx.mp3），
-      // 回给 AI 就等于把本机路径写进模型上下文（也会被敏感信息审计拦）。
-      return {
-        confirmed: true,
-        duration: record.data?.duration != null ? Number(record.data.duration) : null
-      };
+      return await platform.confirmVoiceSent(messageId);
     } catch (error) {
       log(`[voice] 发送后回读校验失败（不影响已发送）：${error?.message ?? error}`);
       return null;
@@ -1887,18 +1803,8 @@ async function main() {
     const wantReadback = readback === true;
     if (wantReadback && sent.messageId) {
       try {
-        const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-        const res = await fetch(`${httpUrl}/fetch_ptt_text`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-          },
-          body: JSON.stringify({ message_id: String(sent.messageId) }),
-          signal: AbortSignal.timeout(30000)
-        });
-        const body = await res.json().catch(() => ({}));
-        if (res.ok && body.status === 'ok' && body.retcode === 0) readbackText = body.data?.text ?? '';
+        const transcript = await platform.voiceToText(sent.messageId);
+        if (transcript !== null) readbackText = transcript;
       } catch (error) {
         log(`[voice] 语音转写回读失败（不影响已发送）：${error?.message ?? error}`);
       }
@@ -1919,20 +1825,21 @@ async function main() {
     const url = entry.url;
     if (!url) throw new Error(`表情 ${entry.id} 没有可发送的图片地址`);
     const [kind, id] = key.split(':');
-    const segments = [];
     const replyToMessageId = options.replyToMessageId;
     const atUserId = options.atUserId;
+    let replyTo = null;
+    let mentionUserId = null;
     // 仿真常识：一条消息只能是一张表情，不能在同一气泡里附带文字说明。
     // 想说的话请用 qq_send_message / qq_reply 作为单独气泡发送。
     if (replyToMessageId !== undefined && replyToMessageId !== null && String(replyToMessageId).trim() !== '') {
       const rid = String(replyToMessageId).trim();
       if (!/^-?[1-9]\d*$/.test(rid)) throw new Error('replyToMessageId 必须是非零整数（消息 id 可能为负数）');
-      segments.push({ type: 'reply', data: { id: rid } });
+      replyTo = rid;
     }
     if (atUserId !== undefined && atUserId !== null && String(atUserId).trim() !== '') {
       const at = String(atUserId).trim();
       if (!/^\d+$/.test(at)) throw new Error('atUserId 必须是正整数 QQ 号，且不能为 all');
-      segments.push({ type: 'at', data: { qq: at } });
+      mentionUserId = at;
     }
     // 在桥接内完成带 DNS 固定、逐跳校验和大小限制的下载；不能把 URL 交给网关重新抓取。
     let image;
@@ -1941,10 +1848,6 @@ async function main() {
     } catch (error) {
       throw new Error(`表情 ${entry.id} 的图片下载失败（QQ CDN 网络异常或地址已失效）：${error?.message ?? error}`);
     }
-    segments.push({ type: 'image', data: { file: 'base64://' + image.buffer.toString('base64') } });
-    const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
-    const params = kind === 'private' ? { user_id: Number(id), message: segments } : { group_id: Number(id), message: segments };
-    const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     // 与文本发送共用 sendChain，保证“先文字后表情”的真人顺序不被并发工具调用打乱。
     let sendResolve;
     let sendReject;
@@ -1957,21 +1860,7 @@ async function main() {
         // 真人发表情前通常会有短暂停顿，避免“文字刚发完表情立刻跟上”的机械感。
         await sleep(randInt(800, 2000));
         assertSendAllowed();
-        const res = await fetch(`${httpUrl}/${action}`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-          },
-          body: JSON.stringify(params),
-          signal: AbortSignal.timeout(15000)
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || body.status !== 'ok' || body.retcode !== 0) {
-          const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口，请检查 config.json 的 snowluma.httpUrl 是否为 OneBot HTTP API 地址）' : '';
-          throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
-        }
-        sendResolve(body.data);
+        sendResolve(await platform.sendMessage(kind, id, { replyTo, mentionUserId, image: image.buffer }));
       } catch (error) {
         sendReject(error);
       }
@@ -2003,7 +1892,7 @@ async function main() {
     const entry = findSticker(synced?.entries ?? stickerEntries, stickerId);
     if (!entry) throw new Error(`找不到表情 ${stickerId}，请先用 qq_list_stickers 获取有效 id`);
     const cleanRemark = String(remark ?? '').trim().slice(0, 50);
-    const response = await bot.request('modify_custom_face', { emoji_id: entry.id, desc: cleanRemark });
+    const response = await platform.setStickerRemark(entry.id, cleanRemark);
     if (!response || response.status !== 'ok' || response.retcode !== 0) {
       throw new Error(`modify_custom_face 失败: ${response?.wording || response?.retcode || 'unknown'}`);
     }
@@ -2028,23 +1917,23 @@ async function main() {
     const mediaList = Array.isArray(found.media) ? found.media : [];
     if (!mediaList.length) throw new Error('这条消息没有可收藏的图片/表情');
     const media = mediaList[0];
-    let file = '';
+    let imageBuffer = null;
     if (media?.kind === 'image') {
-      // 优先取图片字节转 base64，避免 SnowLuma 直接下载聊天图片 URL 失败（带签名/防盗链）。
+      // 优先取图片字节交给平台，避免 SnowLuma 直接下载聊天图片 URL 失败（带签名/防盗链）。
       // 严禁把消息里的原始 media.url / media.file 直接交给 OneBot 去下载：那会绕过 SSRF/本地文件防护。
       const img = await fetchOneBotImage(media);
       if (img?.buffer) {
-        file = 'base64://' + img.buffer.toString('base64');
+        imageBuffer = img.buffer;
       } else {
         throw new Error('无法安全获取该图片字节，已拒绝收藏');
       }
     } else if (media?.kind === 'face') {
       const face = await fetchFaceMedia(media);
-      if (face?.buffer) file = 'base64://' + face.buffer.toString('base64');
+      if (face?.buffer) imageBuffer = face.buffer;
     }
-    if (!file) throw new Error('无法获取该表情的图片源');
+    if (!imageBuffer) throw new Error('无法获取该表情的图片源');
     assertSendAllowed();
-    const addRes = await bot.request('add_custom_face', { file });
+    const addRes = await platform.addSticker(imageBuffer);
     if (!addRes || addRes.status !== 'ok' || addRes.retcode !== 0) {
       throw new Error(`add_custom_face 失败: ${addRes?.wording || addRes?.retcode || 'unknown'}`);
     }
@@ -2054,7 +1943,7 @@ async function main() {
     const cleanRemark = String(remark ?? '').trim().slice(0, maxRemarkChars);
     if (cleanRemark) {
       assertSendAllowed();
-      const modRes = await bot.request('modify_custom_face', { emoji_id: emojiId, desc: cleanRemark });
+      const modRes = await platform.setStickerRemark(emojiId, cleanRemark);
       if (!modRes || modRes.status !== 'ok' || modRes.retcode !== 0) {
         log(`[sticker] 收藏成功但备注失败 ${emojiId}: ${modRes?.wording || modRes?.retcode || 'unknown'}`);
       }
@@ -2562,7 +2451,6 @@ async function main() {
   // DSH 重启期间收到的 QQ 消息先入队（不丢），DSH 恢复后按序补投。
   let dshReady = false;
   let dshCheckStarted = false;
-  let snowlumaWatchStarted = false; // SnowLuma 上游健康探测只启动一次（见 startSnowlumaWatch）
   let currentMode = 'chat'; // chat | closed-agent | reserved（仿真模式，由 DSH settings / state/mode.json 驱动）
   let lastMode = currentMode;
   // closed-agent 模式使用的 DSH agent preset：留空表示「用 DSH 自己声明的默认 preset」。
@@ -2948,168 +2836,6 @@ async function main() {
     setInterval(checkDsh, 5000);
   }
 
-  // ── SnowLuma 上游健康：**连上了 ≠ 收得到** ──────────────────────────────────
-  //
-  // 为什么必须有这一段（这是一个真实存在的、被误诊过的失败形态）：
-  // SnowLuma 用原生组件（`native/snowluma-win32-x64.{dll,node}`）挂进 QQ 客户端进程
-  // 才能拿到消息，它自己的日志里管这层叫 `[Hook]`。这层会退化：
-  //     WARN [Hook] receive path stale: ... silentFor=136193ms; reporting good=false
-  // 而 **SnowLuma 进程与它的 OneBot WebSocket 都还活着**。于是桥接这边一切正常：
-  // WebSocket 是通的、`bot.on('open')` 打过「SnowLuma 已连接」，控制台没有任何异常，
-  // 但群里一条消息都不来 —— 运维看到的现象是「接了但没反应」，而**没有任何证据指向
-  // SnowLuma 的 hook**，于是被报成「qq-bridge 注入失败」。
-  //
-  // 桥接本身**不可能**造成这种失败：它没有任何原生/注入面（依赖全纯 JS，源码里
-  // 没有 .dll/.node/FFI/进程注入），也不启动、不控制 SnowLuma 与 QQ。它能做、也应该做的
-  // 是**把这个失败变得可诊断**。
-  //
-  // 信号从哪来（**两处都实测核对过 SnowLuma 1.14.9 的运行时源码，别凭直觉改**）：
-  //
-  //   ① **心跳载荷里的 `status.good`** —— 权威信号，且是免费的。
-  //      SnowLuma 每 30s 由**自己的定时器无条件**发一个 heartbeat
-  //      （`index.mjs` 的 `HEARTBEAT_INTERVAL = 3e4` / `startHeartbeat()`），
-  //      载荷里带 `status: { online, good: online && bridge.receiveHealthy }`。
-  //      `receiveHealthy` 是它**对「QQ → hook → 我」这条接收链路**的自评，
-  //      静默约 105s 就翻 false。所以：读心跳里的 good 就等于拿到了 hook 的健康度。
-  //      ⚠️ 注意它**不经过** QQ 事件流水线 —— 心跳是本地生成的，所以"没有事件包"
-  //      **不能**用来判断 hook 死活（见下方 ② 的措辞）。
-  //
-  //   ② `get_status` 的 `good`/`online` —— 与 ① 同源，用于①长期收不到时的兜底轮询。
-  //      ⚠️ **不要用 `get_login_info` 取 good**：它只返回 `{ user_id, nickname }`。
-  //      取错字段不会报错（SDK 只校验 status/retcode 信封，不校验 data 载荷），
-  //      good 会永远停在 null —— 本文件第一版就是这么写的，等于权威信号整条是死代码。
-  //      `src/mcp-snowluma-safe.js` 的 snowluma_status 工具是对的取法（get_login_info
-  //      拿昵称 + get_status 拿 online/good），可对照。
-  //
-  //   ③ `bot_status`（账号会话上下线）—— SnowLuma 1.14.17 起才有，老运行时永不触发，
-  //      所以只是加分项，不能作为唯一依据。
-  //
-  //   ④ 「距最近一个事件包的时长」—— 只能证明**SnowLuma 进程与 WS 链路还活着**，
-  //      **不能**证明 hook 收得到 QQ 数据（心跳会一直来）。所以它只作为兜底提示，
-  //      阈值取很宽，措辞必须留余地。
-  const SNOWLUMA_STATUS_POLL_MS = 60_000;
-  const SNOWLUMA_SILENCE_WARN_MS = Math.max(60_000, Number(cfg.snowluma?.silenceWarnMs) || 10 * 60_000);
-  const snowlumaHealth = {
-    lastPacketAt: 0,      // 最近一个来自 SnowLuma 的事件包（含 meta/心跳）
-    lastPacketKind: '',
-    accountOnline: null,  // bot_status 的 online/offline（需要较新的 SnowLuma 运行时）
-    good: null,           // 接收链路健康度：来自心跳 status.good / get_status.good
-    goodSource: '',       // 'heartbeat' | 'get_status' —— 便于诊断"这条判断从哪来"
-    goodError: '',
-    goodCheckedAt: 0,
-    degraded: false,      // 当前是否处于"已告警"状态（边沿触发，避免刷屏）
-    reason: '',
-  };
-
-  /** 记录一次"上游还活着"的证据。任何来自 SnowLuma 的事件包都算（含心跳）。 */
-  function noteUpstreamPacket(kind) {
-    snowlumaHealth.lastPacketAt = Date.now();
-    snowlumaHealth.lastPacketKind = String(kind ?? '');
-  }
-
-  /** 记下一次接收链路健康度。@param good - boolean；非布尔值忽略。 */
-  function noteReceiveHealth(good, source) {
-    if (typeof good !== 'boolean') return;
-    snowlumaHealth.good = good;
-    snowlumaHealth.goodSource = source;
-    snowlumaHealth.goodError = '';
-    snowlumaHealth.goodCheckedAt = Date.now();
-  }
-
-  /** 供 /api/status 与控制台使用的只读快照。 */
-  function snowlumaHealthSnapshot() {
-    const now = Date.now();
-    const agoMs = snowlumaHealth.lastPacketAt ? now - snowlumaHealth.lastPacketAt : null;
-    const silent = snowlumaHealth.lastPacketAt > 0 && agoMs > SNOWLUMA_SILENCE_WARN_MS;
-    // 只有 SnowLuma **明确自报** good=false 才算"确认坏了"（接收链路）。
-    // 「静默」只能说明连它的进程/WS 都没动静了 —— 那是**另一个**故障面，措辞必须分开。
-    const confirmed = snowlumaHealth.good === false;
-    let hint = null;
-    if (confirmed) {
-      hint = 'SnowLuma 自报接收链路异常（good=false）：它的 [Hook] 收不到 QQ 客户端的数据，'
-        + '消息进不来。这不是桥接的问题。请查看 SnowLuma 的 logs/snowluma-*.log 里的 [Hook] 行'
-        + '（receive path stale / process enumeration timed out），并考虑升级 SnowLuma。';
-    } else if (silent) {
-      hint = `已连接但 ${Math.round(agoMs / 60000)} 分钟没有收到任何事件包（连 30 秒一次的心跳都没有）。`
-        + '这说明 SnowLuma 的 OneBot 服务/进程本身可能已经卡住或不在了，而不只是收不到 QQ 数据；'
-        + '请直接查看 SnowLuma 的 logs/snowluma-*.log。';
-    }
-    return {
-      // 只读 snowlumaHealth.connected（由 bot 的 open/close 维护），**不要**在这里引用
-      // `bot`：它在本闭包里声明得晚得多（`const`，TDZ），一旦有人把本函数提前调用就会
-      // 抛 "Cannot access 'bot' before initialization"。
-      connected: snowlumaHealth.connected,
-      accountOnline: snowlumaHealth.accountOnline,
-      good: snowlumaHealth.good,
-      goodSource: snowlumaHealth.goodSource || null,
-      goodError: snowlumaHealth.goodError || null,
-      lastPacketAgoMs: agoMs,
-      lastPacketKind: snowlumaHealth.lastPacketKind || null,
-      silent,
-      degraded: confirmed || silent,
-      hint,
-    };
-  }
-
-  /** 边沿触发地告警/恢复，避免每轮探测都刷一行日志。 */
-  function reportSnowlumaHealth() {
-    const snap = snowlumaHealthSnapshot();
-    if (snap.degraded && !snowlumaHealth.degraded) {
-      snowlumaHealth.degraded = true;
-      snowlumaHealth.reason = snap.hint ?? '';
-      log(`⚠️ SnowLuma 上游不健康：${snap.hint}`);
-      log('   这不是桥接的问题：桥接没有任何原生/注入面，也不控制 SnowLuma 或 QQ。');
-      log('   排查：SnowLuma 的 logs/snowluma-*.log 里搜 [Hook]（看是否有 "receive path stale" 或 "process enumeration timed out"）。');
-    } else if (!snap.degraded && snowlumaHealth.degraded) {
-      snowlumaHealth.degraded = false;
-      snowlumaHealth.reason = '';
-      log('✅ SnowLuma 上游已恢复正常（good≠false 且事件包在流动）');
-    }
-  }
-
-  /**
-   * 问一次 SnowLuma 的 `get_status`：账号在不在线、它自评的接收链路是否健康。
-   *
-   * ⚠️ 必须用 `get_status` —— `get_login_info` 只返回 `{ user_id, nickname }`，
-   *    从它身上取 good 会永远拿到 undefined（而且不会报错，见上方长注释）。
-   *    这里只是**兜底轮询**：主路径是每 30 秒一次的心跳（免费，见 onEvent）。
-   */
-  async function pollSnowlumaStatus() {
-    const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-    try {
-      const res = await fetch(`${httpUrl}/get_status`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {}),
-        },
-        body: '{}',
-        signal: AbortSignal.timeout(8000),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body.status !== 'ok') {
-        snowlumaHealth.goodError = `HTTP ${res.status}${body?.wording ? ` ${body.wording}` : ''}`;
-      } else {
-        noteReceiveHealth(body.data?.good, 'get_status');
-        if (typeof body.data?.online === 'boolean') snowlumaHealth.accountOnline = body.data.online;
-      }
-    } catch (error) {
-      snowlumaHealth.goodError = error?.message ?? String(error);
-    }
-    snowlumaHealth.goodCheckedAt = Date.now();
-    reportSnowlumaHealth();
-  }
-
-  function startSnowlumaWatch() {
-    if (snowlumaWatchStarted) return;
-    snowlumaWatchStarted = true;
-    // 首次延后一点，避免与启动时的连接/自愈抢时序
-    setTimeout(() => { void pollSnowlumaStatus(); }, 5000);
-    setInterval(() => { void pollSnowlumaStatus(); }, SNOWLUMA_STATUS_POLL_MS);
-    // 边沿告警的兜底心跳：主信号（心跳 status.good）到达时会立刻评估，这里只防"心跳也没了"
-    setInterval(reportSnowlumaHealth, 30_000);
-  }
-
   // ── 本地控制台（独立 Web 面板，不依赖 DSH WebUI） ───────────────────────────
   // 模式/角色/静默状态都存 state/*.json，桥接即时感知；此服务只读写这些文件。
   function v2ToolEnabled(flag) {
@@ -3444,7 +3170,7 @@ async function main() {
             socialV2Paused: socialV2.paused,
             // 上游健康只给操作者看：它包含网关诊断信息（good/hint），
             // 属于管理侧观测，不该进 QQ 会话里那个受限的智能体视图。
-            snowluma: snowlumaHealthSnapshot(),
+            snowluma: platform.healthSnapshot(),
             activity: readActivityTail(100)
           });
           return;
@@ -4225,10 +3951,7 @@ async function main() {
           if (!allowed(kind, id, cfg)) { sendJson({ ok: false, error: `目标不在白名单内（${kind} ${id}），请先加入白名单` }, 403); return; }
           if (!modeAllowed(`${kind}:${id}`, kind, id, cfg, currentMode)) { sendJson({ ok: false, error: `当前模式（${currentMode}）不允许向 ${kind}:${id} 发送测试消息` }, 403); return; }
           try {
-            const safeMessage = escapeCqText(redactKnownTokensOnly(message));
-            const result = kind === 'private'
-              ? await bot.sendPrivateMessage(id, text(safeMessage))
-              : await bot.sendGroupMessage(id, text(safeMessage));
+            const result = await platform.sendText(kind, id, redactKnownTokensOnly(message));
             log(`控制台：测试发送 ${kind}:${id} 成功`);
             sendJson({ ok: true, kind, id, message_id: result?.message_id ?? result });
           } catch (error) {
@@ -5401,12 +5124,7 @@ async function main() {
               blocked.statusCode = 403;
               throw blocked;
             }
-            if (kind === 'group') {
-              await bot.raw('group_poke', { group_id: id, user_id: Number(targetUserId) });
-            } else {
-              // 私聊拍一拍：send_poke 自动路由到当前私聊对象
-              await bot.raw('send_poke', { user_id: id });
-            }
+            await platform.poke(kind, id, targetUserId);
             st.lastActionAt = now;
             st.lastAiReplyAt = now;
             st.wakeConfig.noActionCount = 0;
@@ -5628,18 +5346,8 @@ async function main() {
             let readbackText = null;
             if (body.readback === true && sent.messageId) {
               try {
-                const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-                const res = await fetch(`${httpUrl}/fetch_ptt_text`, {
-                  method: 'POST',
-                  headers: {
-                    'content-type': 'application/json',
-                    ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-                  },
-                  body: JSON.stringify({ message_id: String(sent.messageId) }),
-                  signal: AbortSignal.timeout(30000)
-                });
-                const rb = await res.json().catch(() => ({}));
-                if (res.ok && rb.status === 'ok' && rb.retcode === 0) readbackText = rb.data?.text ?? '';
+                const transcript = await platform.voiceToText(sent.messageId);
+                if (transcript !== null) readbackText = transcript;
               } catch (error) {
                 log(`[voice] 转写回读失败：${error?.message ?? error}`);
               }
@@ -6479,7 +6187,7 @@ async function main() {
             return;
           }
           try {
-            const data = await bot.raw('get_forward_msg', { id });
+            const data = await platform.getForwardMessage(id);
             const formatted = formatForwardResponse(data);
             const remember = (fid) => {
               if (!fid) return;
@@ -6514,7 +6222,7 @@ async function main() {
             }
             for (const fid of nestedIds) {
               try {
-                const ndata = await bot.raw('get_forward_msg', { id: fid });
+                const ndata = await platform.getForwardMessage(fid);
                 const nfmt = formatForwardResponse(ndata, { maxMessages: 3, maxCharsPerMessage: 120 });
                 for (const nm of nfmt.messages || []) {
                   for (const nfid of nm.nestedForwardIds || []) remember(nfid);
@@ -6601,13 +6309,8 @@ async function main() {
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getGroupMembers')) { sendJson({ ok: false, error: '工具未启用：qq_get_group_members' }, 403); return; }
           const groupId = Number(groupMatch[1]);
           try {
-            let response;
-            try {
-              response = await bot.request('get_group_member_list', { group_id: groupId });
-            } catch (wsError) {
-              // 与表情库同步同一条原则：WS 挂了不代表网关挂了，读接口走 HTTP 兜底。
-              response = await onebotHttpAction('get_group_member_list', { group_id: groupId });
-            }
+            // WS 挂了时适配层会改走 HTTP 兜底（与表情库同步同一条原则）。
+            const response = await platform.getGroupMemberListWithFallback(groupId);
             const payload = response && typeof response === 'object' && response.data !== undefined ? response.data : response;
             const raw = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : null);
             if (!raw) { sendJson({ ok: false, error: '网关返回的成员列表格式异常，已拒绝' }, 502); return; }
@@ -7230,8 +6933,7 @@ async function main() {
       sendChain = sendChain
         .then(async () => {
           assertSendAllowed();
-          if (kind === 'private') await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
-          else await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          await withTimeout(platform.sendText(kind, id, part), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
         })
         .catch((error) => {
           lastSendFailed.set(key, true);
@@ -7422,8 +7124,7 @@ async function main() {
       sendChain = sendChain
         .then(async () => {
           assertSendAllowed();
-          if (kind === 'private') await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(msg))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
-          else await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(msg))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          await withTimeout(platform.sendText(kind, id, msg), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
           sent.push(msg);
         })
         .catch((error) => {
@@ -7444,17 +7145,18 @@ async function main() {
 
 
   async function onebotSend(kind, id, message, replyToMessageId, atUserId = null) {
-    const segments = [];
+    let replyTo = null;
+    let mentionUserId = null;
     if (replyToMessageId !== undefined && replyToMessageId !== null && String(replyToMessageId).trim() !== '') {
       const rid = String(replyToMessageId).trim();
       if (!/^-?[1-9]\d*$/.test(rid)) throw new Error('replyToMessageId 必须是非零整数（消息 id 可能为负数）');
-      segments.push({ type: 'reply', data: { id: rid } });
+      replyTo = rid;
     }
     if (atUserId !== undefined && atUserId !== null && String(atUserId).trim() !== '') {
       const at = String(atUserId).trim();
       // 只允许正整数 QQ 号，禁止 @all，避免被滥用成 @全体成员
       if (!/^\d+$/.test(at)) throw new Error('atUserId 必须是正整数 QQ 号，且不能为 all');
-      segments.push({ type: 'at', data: { qq: at } });
+      mentionUserId = at;
     }
     const rawMessage = String(message ?? '');
     const hasKnownToken = [...KNOWN_AGENT_TOKENS].some((t) => t && rawMessage.includes(t));
@@ -7462,25 +7164,7 @@ async function main() {
       log(`发送内容包含会话令牌，已阻止发送 (${kind}:${id})`);
       throw new Error('发送内容包含会话令牌，已阻止发送');
     }
-    segments.push({ type: 'text', data: { text: escapeCqText(rawMessage) } });
-    const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
-    const params = kind === 'private' ? { user_id: Number(id), message: segments } : { group_id: Number(id), message: segments };
-    const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-    const res = await fetch(`${httpUrl}/${action}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-      },
-      body: JSON.stringify(params),
-      signal: AbortSignal.timeout(15000)
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || body.status !== 'ok' || body.retcode !== 0) {
-      const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口，请检查 config.json 的 snowluma.httpUrl 是否为 OneBot HTTP API 地址）' : '';
-      throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
-    }
-    return body.data;
+    return platform.sendMessage(kind, id, { replyTo, mentionUserId, text: rawMessage });
   }
 
   // ── 图片/表情字节解析（供一代自动内联与二代按需工具） ────────────────────
@@ -7721,7 +7405,7 @@ async function main() {
       if (!(media.kind === 'image' || media.kind === 'sticker')) return null;
       if (!media.file || !isProbablySafeImageFileRef(media.file)) return null;
       try {
-        const info = await bot.getImage({ file: String(media.file) });
+        const info = await platform.getImage(media.file);
         const obj = info && typeof info === 'object' ? info : {};
         const base64 = base64FromMaybe(obj.data) || base64FromMaybe(obj.base64) || base64FromMaybe(obj.file);
         if (base64) {
@@ -7773,7 +7457,7 @@ async function main() {
     const fallbackText = media.summary ? `[表情:${media.summary}]` : `[表情#${media.faceId}]`;
     if (!Number.isInteger(faceId)) return { text: fallbackText };
     try {
-      const face = await bot.fetchFaceEntity(faceId);
+      const face = await platform.getFace(faceId);
       if (face && typeof face === 'object') {
         const desc = face.q_des || (Array.isArray(face.emoji_name_alias) && face.emoji_name_alias[0]) || '';
         if (face.url) {
@@ -9609,7 +9293,7 @@ async function main() {
     if (!cached || Date.now() - cached.ts > GROUP_MEMBER_IDS_TTL_MS) {
       let list;
       try {
-        list = await bot.getGroupMemberList(Number(gid));
+        list = await platform.getGroupMemberList(gid);
       } catch (error) {
         // 失败即拒绝（fail-closed）：宁可拍不出去，也不要绕过校验。
         return `无法获取群 ${gid} 的成员列表：${error?.message ?? error}`;
@@ -9636,7 +9320,7 @@ async function main() {
       // 优先精确查询单个成员（快，适合单条 @）
       let name = null;
       try {
-        const info = await bot.getGroupMemberInfo(Number(groupId), Number(userId));
+        const info = await platform.getGroupMemberInfo(groupId, userId);
         name = info?.card || info?.nickname || null;
       } catch {}
       if (name) {
@@ -9645,7 +9329,7 @@ async function main() {
         return name;
       }
       // 回退：拉一次整群成员列表并建立整组缓存（兼容未实现 get_group_member_info 的网关）
-      const list = await bot.getGroupMemberList(Number(groupId));
+      const list = await platform.getGroupMemberList(groupId);
       const members = Array.isArray(list) ? list : (list?.data ?? []);
       const now = Date.now();
       for (const m of members) {
@@ -9687,7 +9371,7 @@ async function main() {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
       }
-      const raw = await bot.getMessage(numericId);
+      const raw = await platform.getMessage(numericId);
       if (!raw) {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
@@ -11811,82 +11495,12 @@ async function main() {
     }
   }
 
-  // QQ 侧（SnowLuma OneBot WebSocket 客户端）
-  const bot = new SnowLumaWebSocketClient({
-    url: cfg.snowluma.wsUrl,
-    accessToken: cfg.snowluma.accessToken || undefined,
-    reconnect: true
-  });
-
-  bot.onPrivateMessage(async (event) => {
-    // 统一按字符串比较：网关可能把 id 序列化成 number/string 混用，
-    // 用 `===` 漏掉自己发的消息会进入正常处理（reserved2 下 AI 会回答自己 / chat 下可能回复循环）。
-    if (String(event?.user_id ?? '') === String(event?.self_id ?? '')) return;
-    try { await handleIncoming('private', event.user_id, event, cfg); } catch (error) { log('处理私聊消息出错:', error?.message ?? error); }
-  });
-  bot.onGroupMessage(async (event) => {
-    if (String(event?.sender?.user_id ?? '') === String(event?.self_id ?? '')
-      || String(event?.user_id ?? '') === String(event?.self_id ?? '')) return;
-    try { await handleIncoming('group', event.group_id, event, cfg); } catch (error) { log('处理群消息出错:', error?.message ?? error); }
-  });
-  bot.onNotice('notify', async (event) => {
-    try { await handlePokeNotice(event); } catch (error) { log('处理拍一拍事件出错:', error?.message ?? error); }
-  });
-
-  // ── 上游健康：任何事件包都算「SnowLuma 还活着」，心跳还额外带接收链路健康度 ──
-  // 用 onEvent 挂一个**旁路**订阅（不影响主链路）：
-  //   · 任意事件包 → 记账（证明 SnowLuma 进程 + WS 链路还在）；
-  //   · `meta_event/heartbeat` → 读载荷里的 `status.good`。**这是主信号**：
-  //     SnowLuma 每 30 秒无条件发一次心跳，而 good = online && receiveHealthy 是它对
-  //     「QQ → hook → 我」这条接收链路的自评（实测核对过 1.14.9 运行时源码）。
-  //     免费、及时，且**不依赖较新的运行时**。
-  // 注册失败不影响主链路（不同 SDK 版本的订阅方法可能不同），所以整体包在 try 里。
-  try {
-    bot.onEvent((event) => {
-      const post = event?.post_type;
-      noteUpstreamPacket(post
-        ? `${post}${event.notice_type ? `/${event.notice_type}` : ''}${event.meta_event_type ? `/${event.meta_event_type}` : ''}${event.message_type ? `/${event.message_type}` : ''}`
-        : 'event');
-      if (post === 'meta_event' && event?.meta_event_type === 'heartbeat') {
-        // status 未在 SDK 类型里声明（OneBotMetaEvent 只声明 meta_event_type），
-        // 但 OneBotBaseEvent 是 JsonObject，读取合法。
-        noteReceiveHealth(event.status?.good, 'heartbeat');
-        if (typeof event.status?.online === 'boolean') snowlumaHealth.accountOnline = event.status.online;
-        reportSnowlumaHealth();
-      }
-    });
-  } catch (error) {
-    log(`（上游事件旁路订阅不可用，健康检测退化：${error?.message ?? error}）`);
-  }
-
-  // SnowLuma 1.14.17 起新增 bot_status（账号会话边沿）。老运行时不会发这个事件，
-  // 所以它只是加分项：收到就记下来，收不到不影响其它判断。
-  try {
-    bot.onBotStatus((event) => {
-      noteUpstreamPacket('notice/bot_status');
-      const sub = String(event?.sub_type ?? '');
-      snowlumaHealth.accountOnline = sub === 'online';
-      if (sub === 'offline') {
-        log('⚠️ SnowLuma 报告 QQ 账号会话已离线（bot_status: offline）—— QQ 侧掉线或被顶号，'
-          + '在重新登录之前群里不会有任何消息进来。');
-      } else if (sub === 'online') {
-        log('SnowLuma 报告 QQ 账号会话已上线（bot_status: online）');
-      }
-    });
-  } catch (error) {
-    log(`（bot_status 订阅不可用（SnowLuma 运行时较旧？）：${error?.message ?? error}）`);
-  }
-
-  bot.on('open', () => {
-    // 用实际连接地址（自愈后可能与 config 里的初值不同，别打印过期的那个）
-    const connectedUrl = bot.url ?? cfg.snowluma.wsUrl;
-    snowlumaHealth.connected = true;
-    log(`SnowLuma 已连接：${connectedUrl}`);
-    // 「已连接」只说明与 SnowLuma 的 WebSocket 通了，**不说明 QQ 侧收得到消息** ——
-    // 这个区别见 startSnowlumaWatch 的说明。这里顺手把上游健康快照刷一次。
-    void pollSnowlumaStatus();
+  // QQ 侧：连接、断线自愈与上游健康都在适配层里，这里只接收消息/拍一拍事件。
+  platform.onMessage((kind, id, event) => handleIncoming(kind, id, event, cfg));
+  platform.onPoke((event) => handlePokeNotice(event));
+  platform.onReady(() => {
     // 读取机器人昵称（用于社交模式"被提到"识别）；重连后也会刷新
-    bot.getLoginInfo().then((login) => {
+    platform.getLoginInfo().then((login) => {
       if (login?.nickname) {
         selfNickname = String(login.nickname).toLowerCase();
         selfDisplayName = String(login.nickname).trim();
@@ -11894,144 +11508,15 @@ async function main() {
       }
       if (login?.user_id != null) selfUserId = String(login.user_id);
     }).catch(() => {});
-    // 连接成功后顺手确认一下 token 是否已跟当前账号对齐；不一致就写回 config.json，
-    // 让 MCP 工具（另一个进程）也能拿到正确的 token。
-    void syncTokenToFile();
   });
-
-  /**
-   * SnowLuma 恢复连接时自愈 accessToken。
-   *
-   * 为什么需要：SnowLuma 的 OneBot 配置按账号分文件（config/onebot_<QQ号>.json），
-   * 每个账号 token 不同。换账号登录后，config.json 里的旧 token 会 401/连不上，
-   * 而 SDK 的重连会一直用**构造时**那个 token 无限重试 —— 表现为"桥接活着但收发全废"。
-   * 这里在每次重连失败时重新发现当前账号的 token 并热更新，随后自愈。
-   */
-  /**
-   * 应用自愈结果：**HTTP token 与 WS token 是两个不同的值**。
-   *   - cfg.snowluma.accessToken → HTTP 调用（发语音、fetch_ptt_text、get_msg 等）与写回 config.json
-   *   - bot.accessToken          → WebSocket 连接（桥接的主链路，端口 3001）
-   * 只修其中一个的话，桥接仍会以 1006 反复重连（实测踩过）。
-   */
-  async function applyHealedTokens(r) {
-    const httpToken = r.token;
-    const wsToken = r.wsToken || r.token;
-    // ⚠️ 端点跟随是可关的（`snowluma.followDiscoveredEndpoint: false`），默认保持原行为。
-    //
-    // 为什么需要这个开关：自愈会拿 `discoverSnowLumaConnection()` **发现到的** wsUrl
-    // 覆盖掉配置里的值，并写回 config.json。这在"换了 QQ 账号所以端口变了"的主场景下
-    // 是对的（端口确实是 per-account 的），但它**不区分**「用户写的是一个过期值」和
-    // 「用户就是要指向别处」。后果：
-    //   · 想跑第二个实例/指向另一份 SnowLuma 安装（多账号、测试、灰度）时，
-    //     它会静默把端点改回去、连到发现到的那一份 —— 表现为"消息发到了另一个账号/群"，
-    //     或者"我明明指向了 B 却一直在收 A 的消息"，很难归因；
-    //   · 实测踩过：把 wsUrl 指向一个死端口想让它"别连"，启动后仍被改回真实端点并连上。
-    // 关掉之后**只自愈 token**（换账号仍然能恢复），但绝不动 URL、也不写回 URL。
-    const followEndpoint = cfg.snowluma?.followDiscoveredEndpoint !== false;
-    const wsUrl = followEndpoint ? (r.wsUrl || cfg.snowluma.wsUrl) : cfg.snowluma.wsUrl;
-    const wsChanged = bot.accessToken !== wsToken || bot.url !== wsUrl;
-    bot.accessToken = wsToken || undefined;
-    // 端口也是 per-account 的（实测：换账号后 WS 从 3001 之类变到别的端口），
-    // 只换 token 不换 URL 会一直 1006 重连。
-    bot.url = wsUrl;
-    if (wsChanged) log(`🔄 SnowLuma WS 连接已更新：${wsUrl}（token ${String(wsToken).slice(0, 4)}…）`);
-    if (cfg.snowluma.accessToken !== httpToken) {
-      log(`🔄 SnowLuma HTTP token 已更新（来源 ${r.source}）：${String(cfg.snowluma.accessToken).slice(0, 4)}… → ${String(httpToken).slice(0, 4)}…`);
-      cfg.snowluma.accessToken = httpToken;
-    }
-    if (!followEndpoint && r.wsUrl && r.wsUrl !== cfg.snowluma.wsUrl) {
-      log(`   （已按 snowluma.followDiscoveredEndpoint=false 忽略发现到的端点 ${r.wsUrl}，继续用配置值 ${cfg.snowluma.wsUrl}）`);
-    }
-    // 把确认可用的端点写回 config.json：下次启动直接就对了，不用再自愈一遍。
-    // ⚠️ 必须在**改 cfg 之前**算出要写什么，但写文件时对照的是**文件里**的旧值 ——
-    //    这里显式传 wsUrl，且不依赖 cfg 的内存值来判断"是否需要写"。
-    // 关掉端点跟随时不写 URL：否则"我设了别处"这件事会被自愈持久化地抹掉。
-    const previousWsUrl = cfg.snowluma.wsUrl;
-    cfg.snowluma.wsUrl = wsUrl;
-    try {
-      const w = persistSnowLumaEndpoint(path.join(ROOT, 'config.json'), {
-        accessToken: httpToken,
-        ...(followEndpoint ? { wsUrl, httpUrl: r.baseUrl } : {})
-      });
-      if (w.updated) log(`   已写回 config.json：${Object.keys(w.changed).join(' / ')}`);
-      else log('   config.json 端点已是最新，无需改写');
-      if (!followEndpoint && previousWsUrl !== wsUrl) cfg.snowluma.wsUrl = previousWsUrl;
-    } catch (error) {
-      log(`   ⚠️ 写回 config.json 失败：${error?.message ?? error}`);
-    }
-    // 更新了就让 SDK 立刻用新参数重连（否则要等下一轮退避，最长要好几秒）
-    if (wsChanged) {
-      try { bot.close(1000, 'token-refresh'); } catch {}
-      try { bot.connect(); } catch {}
-    }
-    return wsChanged;
-  }
-
-  /** 只写文件、不动物件（连接已成功时用）。 */
-  async function syncTokenToFile() {
-    try {
-      const r = persistToken(path.join(ROOT, 'config.json'), cfg.snowluma.accessToken ?? '');
-      // 只记「已写回」，不打印 token 片段：日志会被贴进 issue / 截图，
-      // 前 4 个字符同样是凭据的一部分（CWE-532，见 PR #13）。
-      if (r.updated) log('🔄 已把当前 token 写回 config.json');
-    } catch {}
-  }
-
-  let tokenHealAt = 0;
-  async function healTokenIfStale(reason) {
-    const now = Date.now();
-    if (now - tokenHealAt < 10000) return;   // 节流：close 事件会连续触发
-    tokenHealAt = now;
-    try {
-      const r = await discoverSnowLumaConnection({ cfg, timeoutMs: 4000 });
-      if (!r.ok) {
-        log(`⚠️ token 自愈失败（${reason}）：${r.error}`);
-        return;
-      }
-      await applyHealedTokens(r);
-      log(`   自愈完成：账号 ${r.self?.user_id ?? '?'}（${reason}）`);
-    } catch (error) {
-      log(`⚠️ token 自愈异常：${error?.message ?? error}`);
-    }
-  }
-
-  bot.on('close', (info) => {
-    snowlumaHealth.connected = false;
-    log(`SnowLuma 连接断开（code=${info?.code ?? '?'}），重连中…`);
-    // 连不上时最常见的原因就是换了 QQ 账号 → token 变了；顺手自愈。
-    // 注意 1006 在**每次启动**都可能出现一次：HTTP token 与 WS token 是两个不同的值，
-    // config.json 里存的是前者，WS 需要用自愈发现的那个（详见 bot.connect() 处的说明）。
-    void healTokenIfStale(`close code=${info?.code ?? '?'}`);
-  });
-  bot.on('error', (error) => {
-    // SDK 在 WS 升级被拒（401 / 建连失败）时可能**只 emit error、不 emit close**，
-    // 于是挂在 close 上的 token 自愈永远不会触发 —— 表现为「桥接活着但收发全废」，
-    // 用户只能靠手工改 token 绕过去（issue #19）。这里同样尝试一次（内部有 10s 节流）。
-    const detail = error && typeof error === 'object'
-      ? [error.code, error.message, error.reason, error.type].filter(Boolean).join(' | ') || JSON.stringify(error)
-      : String(error ?? '');
-    log(`SnowLuma 错误：${detail || '(无详情)'}`);
-    void healTokenIfStale(`error ${detail}`.trim().slice(0, 200));
-  });
-
-  // SnowLuma 尚未就绪时不阻塞桥接启动：SDK 自带后台重连，DSH 侧照常连接。
-  bot.connect().catch((error) => {
-    // 说明为什么"第一次连不上"在这里几乎是**必然**的，避免用户把它当成故障：
-    // SnowLuma 的 **HTTP token（默认 3000）与 WS token（默认 3001）是两个不同的值**
-    // （实测：同一个账号，两者不同；config.json 只能存一个，存的是 HTTP 那个）。
-    // 所以 WS 首次连接通常会被拒 → close(1006) → 触发 token 自愈（重新发现 WS token）
-    // → 重连成功后才是「SnowLuma 已连接」。若 homeDir 没配/被移动/读不到 SnowLuma 的
-    // config/onebot_<QQ>.json，自愈就无从下手，这时才会一直连不上 —— 那种情况请查
-    // 日志里的「token 自愈失败」与 config.json 的 snowluma.homeDir。
-    log(`SnowLuma 首次连接未成功（将在后台自动重连并尝试自愈 WS token）: ${error?.message ?? error}`);
-  });
+  // 平台尚未就绪时不阻塞桥接启动：SDK 自带后台重连，DSH 侧照常连接。
+  platform.start();
   log('桥接已启动。按 Ctrl+C 退出。');
   // 预热表情库：启动时同步一次 QQ 收藏表情，失败不阻塞（AI 首次调用工具时还会再试）。
   if (cfg.socialV2?.sticker?.enabled !== false) {
     syncStickerLibrary(true).catch((error) => log('启动预热表情库失败:', error?.message ?? error));
   }
   startDshWatch();
-  startSnowlumaWatch();
   startConsoleServer();
 
   await pumpMux();

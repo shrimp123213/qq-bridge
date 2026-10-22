@@ -111,8 +111,9 @@ console.log('## 独立工具确实用它（源码级）');
     ok(/snowluma-conn\.js/.test(src), `${rel} 引入自发现模块`);
     ok(/discoverSnowLumaConnection/.test(src), `${rel} 调用自动发现`);
   }
-  // ↓ 下面两条查的是本仓库的 bridge.js，与工具在不在无关，照跑。
-  const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
+  // ↓ 下面两条查的是本仓库的桥接（token 自愈在平台适配层里），与工具在不在无关，照跑。
+  const bridge = ['src/bridge.js', 'src/platform/qq-onebot.js']
+    .map((rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')).join('\n');
   ok(/healTokenIfStale/.test(bridge), 'bridge 有 token 自愈');
   ok(/persistToken/.test(bridge), 'bridge 会把有效 token 写回 config.json');
 }

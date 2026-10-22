@@ -122,12 +122,11 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
       return { status: 'ok', retcode: 0, data: [{ emoji_id: 'fixture-sticker', url: 'https://public.invalid/sticker' }] };
     }
   }
-  let source = fs.readFileSync(path.join(root, 'src/bridge.js'), 'utf8');
   // 去掉顶层 import（VM 里靠 context 注入提供这些绑定）。
   // 必须按行处理：这些 import 有**多行**写法，用单行正则（/^import[\s\S]*?;/gm）会在
   // 第一个分号处停下，把紧跟其后的正常代码一起删掉（曾把 `cfg.socialV2.voice = {…}`
   // 整段吞掉，导致语音相关断言在虚拟环境里悄悄失真）。
-  source = source.split(/\r?\n/).reduce((acc, line) => {
+  const stripImports = (src) => src.split(/\r?\n/).reduce((acc, line) => {
     if (acc.droppingImport) {
       if (/;\s*$/.test(line)) acc.droppingImport = false;
       return acc;
@@ -139,9 +138,10 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     acc.out.push(line);
     return acc;
   }, { out: [], droppingImport: false }).out.join('\n');
+  let source = stripImports(fs.readFileSync(path.join(root, 'src/bridge.js'), 'utf8'));
   source = source.replaceAll('import.meta.url', JSON.stringify(pathToFileURL(path.join(temp, 'src/bridge.js')).href));
   source = source.slice(0, source.indexOf("process.on('SIGINT'"));
-  source = source.replace('  bot.onPrivateMessage(async (event) => {', `
+  source = source.replace('  platform.onMessage((kind, id, event) => handleIncoming(kind, id, event, cfg));', `
   return {
     ensureSession, ensureSlangLearnerSession, resolvePresetName, deliverPrompt, drainPromptQueue,
     sendToQQ, sendStickerV2, handleIncoming, startConsoleServer, cfg, state, api, promptQueues,
@@ -153,7 +153,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     getInitialPrompt, setInitialPrompt, loadInitialPrompts, formatInitialPromptV2,
     initialPrompts, initialPromptMaxChars,
     extractMediaFromSegments, segmentsToText, fetchOneBotImage, fetchMediaData, resolveMediaList,
-    emojiCdnCandidates, getImageDimensions, acceptImageBuffer, MAX_MEDIA_BYTES, bot,
+    emojiCdnCandidates, getImageDimensions, acceptImageBuffer, MAX_MEDIA_BYTES, bot: platform.client,
     isConversationBusyV2, v2TurnStartAt, turnLeaseNoted, TURN_BUSY_LEASE_MS,
     settingFromDshNamespace, selfIdentityTextV2, buildWakeReminderPromptV2,
     getMode() { return currentMode; },
@@ -170,7 +170,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     setPresets(value) { dshPresetIds = value; dshDefaultPreset = 'standard'; },
     resetEpoch() { sessionEpoch++; },
   };
-  bot.onPrivateMessage(async (event) => {`);
+  platform.onMessage((kind, id, event) => handleIncoming(kind, id, event, cfg));`);
   const timers = new Set();
   const context = vm.createContext({
     fs, os, path, http, crypto, fileURLToPath, URL, Buffer, AbortSignal, console: { log() {}, error() {} },
@@ -215,6 +215,10 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     cleanupTemp: () => {},
     ...globals,
   });
+  // 平台适配层也在 bridge realm 里执行：它引用的 SnowLumaWebSocketClient / text / fetch
+  // 都取自上面的 context（FakeBot / fakeFetch，或调用方用 globals 覆盖的桩）。
+  const platformSource = stripImports(fs.readFileSync(path.join(root, 'src/platform/qq-onebot.js'), 'utf8')).replace(/^export /gm, '');
+  vm.runInContext(`Object.assign(globalThis, (() => { ${platformSource}\nreturn { createQQPlatform }; })());`, context);
   // Execute the pure model view in the bridge realm. Its plain-object checks
   // should see the same prototypes as real bridge messages, just as in Node.
   const modelViewSource = fs.readFileSync(path.join(root, 'src/qq-model-view.js'), 'utf8').replace(/^export /gm, '');

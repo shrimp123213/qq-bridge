@@ -23,7 +23,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
+// 上游健康、订阅与端点自愈的实现在平台适配层里，/api/status 的上报在 bridge.js 里：两份一起查。
+const bridge = ['src/bridge.js', 'src/platform/qq-onebot.js']
+  .map((rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')).join('\n');
 const consoleHtml = fs.readFileSync(path.join(ROOT, 'public', 'console.html'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
@@ -150,11 +152,11 @@ test('静默检测不得声称能判断 hook 死活（心跳是本地生成的�
 });
 
 test('/api/status 暴露 snowluma 健康快照，且只给操作者', () => {
-  assert.match(bridgeCode, /snowluma: snowlumaHealthSnapshot\(\)/, '/api/status 必须带 snowluma 字段');
+  assert.match(bridgeCode, /snowluma: platform\.healthSnapshot\(\)/, '/api/status 必须带 snowluma 字段');
   // 智能体视图（带 x-agent-token 的那支）不得包含它
   const agentBranch = bridgeCode.slice(
     bridgeCode.indexOf("req.headers['x-agent-token'] || req.headers['x-agent-call'] !== undefined"),
-    bridgeCode.indexOf('snowluma: snowlumaHealthSnapshot()'),
+    bridgeCode.indexOf('snowluma: platform.healthSnapshot()'),
   );
   assert.ok(agentBranch.length > 0, '应能定位智能体分支与操作者分支');
   assert.ok(

@@ -150,7 +150,9 @@ console.log('## MCP 工具与 bridge 路由');
   ok(voiceBlock.includes('/api/socialV2/send-voice'), 'qq_send_voice 调 /api/socialV2/send-voice');
   ok(!voiceBlock.includes("绝对路径的音频"), 'qq_send_voice 不暴露绝对路径参数');
 
-  const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
+  // record 段在平台适配层里构造，路由与函数在 bridge.js 里：两份一起查。
+  const bridge = ['src/bridge.js', 'src/platform/qq-onebot.js']
+    .map((rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')).join('\n');
   for (const s of [
     '/api/voice/send', '/api/socialV2/send-voice', '/api/socialV2/voices',
     'sendVoiceV2', 'sendVoiceForV2', 'resolveVoicePathForV2', 'resolveVoicePathForOperator',
