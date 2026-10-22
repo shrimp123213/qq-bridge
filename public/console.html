@@ -1791,7 +1791,7 @@ button:active:not(:disabled) {
       <div id="connectionAlert" class="connection-alert" role="alert" hidden></div>
       <div id="overviewSummary" class="overview-summary span-all" data-page="overview">
         <div class="metric"><span>DSH 连接</span><strong id="metricDsh">连接中</strong><small id="metricDshHint">等待服务响应</small></div>
-        <div class="metric"><span>SnowLuma 上游</span><strong id="metricSnowluma">读取中</strong><small id="metricSnowlumaHint">等待网关健康上报</small></div>
+        <div class="metric"><span id="metricSnowlumaLabel">SnowLuma 上游</span><strong id="metricSnowluma">读取中</strong><small id="metricSnowlumaHint">等待网关健康上报</small></div>
         <div class="metric"><span>当前运行模式</span><strong id="metricMode">—</strong><small id="metricRole">正在读取角色</small></div>
         <button class="metric metric-link" data-view="sessions"><span>已建立会话</span><strong id="metricSessions">—</strong><small>查看会话映射 <span aria-hidden="true">↗</span></small></button>
         <button class="metric metric-link" data-view="sessions" data-target="section-pending"><span>待处理请求</span><strong id="metricPending">—</strong><small>提问与工具审批 <span aria-hidden="true">↗</span></small></button>
@@ -2095,7 +2095,7 @@ button:active:not(:disabled) {
         <label style="flex:1">推荐 @ 唤醒</label><input type="checkbox" id="v2RecAt" style="width:auto">
         <label style="flex:1">推荐名字唤醒</label><input type="checkbox" id="v2RecName" style="width:auto">
         <label style="flex:1">推荐提问唤醒</label><input type="checkbox" id="v2RecQuestion" style="width:auto">
-        <label style="flex:1">推荐拍一拍唤醒</label><input type="checkbox" id="v2RecPoke" style="width:auto">
+        <label style="flex:1" data-requires="poke">推荐拍一拍唤醒</label><input type="checkbox" id="v2RecPoke" style="width:auto" data-requires="poke">
       </div>
       <label>唤醒推荐提示（给 AI 看的文字）</label>
       <textarea id="v2WakeHint" rows="2" placeholder="例如：如果你在潜水，推荐 5~120 分钟、普通消息概率 0.05…"></textarea>
@@ -2185,7 +2185,7 @@ button:active:not(:disabled) {
       </div>
 
       </div></details>
-<details class="settings-group"><summary>表情包参数（sticker：QQ 收藏表情体系）</summary><div class="settings-content">
+<details class="settings-group" data-requires="stickerLibrary"><summary>表情包参数（sticker：QQ 收藏表情体系）</summary><div class="settings-content">
       <div class="row">
         <label style="flex:1">启用表情包体系</label><input type="checkbox" id="v2StickerEnabled" style="width:auto">
         <label style="flex:1">同步缓存 TTL（秒）</label><input type="number" id="v2StickerSyncTtlSec" min="1" style="width:90px">
@@ -2713,8 +2713,9 @@ function renderSnowlumaHealth(sl) {
   } else {
     strong.textContent = '正常 · 接收中';
     strong.className = 'ok';
-    hint.textContent = (receiving ? '最近一份上游事件包在 ' + fmtAgoMs(ago) + '前 · ' : '')
-      + (sl.good === false ? 'good=false' : sl.good === true ? 'good=true' : 'good 未上报');
+    // good 是 OneBot get_status 的字段，Discord 没有。
+    const goodText = sl.platform === 'discord' ? '' : (sl.good === false ? 'good=false' : sl.good === true ? 'good=true' : 'good 未上报');
+    hint.textContent = [receiving ? '最近一份上游事件包在 ' + fmtAgoMs(ago) + '前' : '', goodText].filter(Boolean).join(' · ');
   }
   if (!degraded) { el.style.display = 'none'; return; }
   document.getElementById('snowlumaWarnHint').textContent = sl.hint
@@ -2725,9 +2726,28 @@ function renderSnowlumaHealth(sl) {
   el.style.display = '';
 }
 
+// 平台做不到的功能（Discord 的拍一拍、收藏表情、合并转发、QQ 专用旧工具…）在控制台里隐藏：
+// 桥接调用期与 MCP 注册期本来就当它们关闭，留着开关只会让人以为还能用。
+// 表由 /api/status 的 capabilities 给出（与 platform/capabilities.js 同源）；旧版桥接没有该字段时什么都不藏。
+// 用 data-platform-hidden 另做标记：页面切换也用 hidden，搜索只能排除「因平台而藏」的项。
+function setPlatformHidden(el, hide) {
+  el.hidden = hide;
+  el.toggleAttribute('data-platform-hidden', hide);
+}
+function applyPlatformCapabilities(status) {
+  const caps = status?.capabilities || {};
+  const flags = new Set(caps.unsupportedToolFlags || []);
+  const tools = new Set(caps.unsupportedTools || []);
+  document.querySelectorAll('#v2Tools input[data-v2-tool]').forEach(input => setPlatformHidden(input.closest('label'), flags.has(input.dataset.v2Tool)));
+  document.querySelectorAll('[data-requires]').forEach(el => setPlatformHidden(el, caps[el.dataset.requires] === false));
+  document.querySelectorAll('#section-reference tr').forEach(row => setPlatformHidden(row, tools.has(row.cells[0]?.textContent.trim())));
+  document.getElementById('metricSnowlumaLabel').textContent = status?.platform === 'discord' ? 'Discord 上游' : 'SnowLuma 上游';
+}
+
 async function refresh() {
   try {
     const s = await api('/api/status');
+    applyPlatformCapabilities(s);
     document.querySelectorAll('#modeRow button').forEach(b => (b.classList.toggle('active', b.dataset.mode === s.mode), b.setAttribute('aria-pressed', String(b.dataset.mode === s.mode))));
     document.getElementById('roleText').textContent = s.role || '无';
     document.getElementById('roleModeText').textContent = s.roleMode === 'silent' ? '静默' : '正常';
@@ -4563,7 +4583,7 @@ searchInput.addEventListener('input', () => {
   const query = searchInput.value.trim().toLowerCase();
   searchResults.replaceChildren();
   if (!query) return closeConsoleSearch();
-  const matches = featureIndex.filter(entry => (consolePages[entry.page][0] + entry.label + entry.target.id).toLowerCase().includes(query)).slice(0,12);
+  const matches = featureIndex.filter(entry => !entry.target.closest('[data-platform-hidden]') && (consolePages[entry.page][0] + entry.label + entry.target.id).toLowerCase().includes(query)).slice(0,12);
   if (!matches.length) { const empty = document.createElement('p'); empty.textContent = '未找到匹配功能，试试「唤醒」「白名单」或「表情」。'; searchResults.append(empty); }
   matches.forEach(entry => {
     const button = document.createElement('button');

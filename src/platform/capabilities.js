@@ -45,6 +45,14 @@ export function platformSupportsTool(platform, toolName) {
   return !only || only === platform;
 }
 
+/** 平台做不到的工具开关与工具名（控制台据此隐藏对应设置；与注册期、调用期同一份表）。 */
+export function platformUnsupported(platform) {
+  return {
+    toolFlags: [...(UNSUPPORTED_TOOL_FLAGS[platform] ?? [])],
+    tools: Object.keys(PLATFORM_ONLY_TOOLS).filter((name) => PLATFORM_ONLY_TOOLS[name] !== platform),
+  };
+}
+
 /** 平台是否有「收藏表情库」（QQ 账号的 custom face）。 */
 export function platformHasStickerLibrary(platform) {
   return platformSupportsToolFlag(platform, 'listStickers');

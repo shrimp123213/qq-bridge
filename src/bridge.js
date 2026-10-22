@@ -18,7 +18,7 @@ import { extractPresetPrefix, presetPromptBlockers, presetPromptWarnings, render
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
 import { createQQPlatform } from './platform/qq-onebot.js';
-import { PLATFORMS, platformOf, platformPreset, platformSupportsToolFlag, platformHasStickerLibrary } from './platform/capabilities.js';
+import { PLATFORMS, platformOf, platformPreset, platformSupportsToolFlag, platformHasStickerLibrary, platformUnsupported } from './platform/capabilities.js';
 import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from './dsh-client.js';
 import { mdToPlain, splitForQQ, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
@@ -3209,6 +3209,17 @@ async function main() {
             allowGroups: cfg.allow?.groups ?? [],
             allowPrivate: cfg.allow?.private ?? [],
             socialV2Paused: socialV2.paused,
+            platform: cfg.platform,
+            // 平台做不到的功能（能力表见 platform/capabilities.js）：控制台据此隐藏对应设置。
+            capabilities: (() => {
+              const unsupported = platformUnsupported(cfg.platform);
+              return {
+                poke: platformHasPoke,
+                stickerLibrary: platformHasStickerLibrary(cfg.platform),
+                unsupportedToolFlags: unsupported.toolFlags,
+                unsupportedTools: unsupported.tools,
+              };
+            })(),
             // 上游健康只给操作者看：它包含网关诊断信息（good/hint），
             // 属于管理侧观测，不该进 QQ 会话里那个受限的智能体视图。
             snowluma: platform.healthSnapshot(),
