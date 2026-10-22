@@ -299,10 +299,10 @@ console.log('## 回归：AI 通道的语音库响应不许带出绝对路径（P
 if (process.env.BRIDGE_TEST_LIVE === '1') {
   console.log('## live：桥接 voice 端点 dry-run');
   if (!fs.existsSync(path.join(ROOT, 'config.json'))) {
-    // live 段要打**真的**桥接：端口、consoleToken、白名单群号、语音库目录全部来自
+    // live 段要打**真的**桥接：端口、consoleToken、白名单频道 id、语音库目录全部来自
     // 用户本机 config.json。config.example.json 给不出这些（groups 是空的），
     // 硬跑只会得到"前置条件不足"这种假失败 —— 如实跳过（措辞与 skipVoiceTool 同款）。
-    console.log('  ⏭  跳过：live 段需要本机 config.json（端口/consoleToken/白名单群号/语音库目录）');
+    console.log('  ⏭  跳过：live 段需要本机 config.json（端口/consoleToken/白名单频道 id/语音库目录）');
     console.log('     原因：config.json 被 .gitignore（含真实用户 id/token），config.example.json 给不出这些值');
     console.log('     想跑这段：先照 config.example.json 建好自己的 config.json，再设 BRIDGE_TEST_LIVE=1。');
     console.log('     注意：这是**跳过，不是通过** —— 这台机器上没有覆盖到 live 链路。');

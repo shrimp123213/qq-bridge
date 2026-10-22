@@ -2024,9 +2024,9 @@ button:active:not(:disabled) {
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getUnread"> <span><b>chat_get_unread_messages</b><span class="meta">查看未读消息，不自动标记已读</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getRecent"> <span><b>chat_get_recent_messages</b><span class="meta">查看最近消息，支持 offset 扩大范围</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="socialState"> <span><b>chat_social_state</b><span class="meta">查看当前 WakeConfig、未读数、上次唤醒原因等</span></span></label>
-        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendGroup"> <span><b>chat_send_group_message</b><span class="meta">向指定群发送一条纯文本消息</span></span></label>
-        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendPrivate"> <span><b>chat_send_private_message</b><span class="meta">向指定好友发送一条纯文本消息</span></span></label>
-        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="reply"> <span><b>chat_reply</b><span class="meta">引用/回复某条群消息并发送文本</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendGroup"> <span><b>chat_send_group_message</b><span class="meta">向指定频道发送一条纯文本消息</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendPrivate"> <span><b>chat_send_private_message</b><span class="meta">向指定用户私信发送一条纯文本消息</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="reply"> <span><b>chat_reply</b><span class="meta">引用/回复某条频道消息并发送文本</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendBurst"> <span><b>chat_send_burst</b><span class="meta">按数组分多条发送，桥接自动加真人化间隔</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendMessage"> <span><b>chat_send_message</b><span class="meta">统一发送：一条/多条/引用/自定义或按字数计算间隔</span></span></label>
         <label class="v2-tool-item"><input type="checkbox" data-v2-tool="waitMessages"> <span><b>chat_wait_for_messages</b><span class="meta">短暂等待新消息，有新消息立即返回或超时返回</span></span></label>
@@ -2225,7 +2225,7 @@ button:active:not(:disabled) {
       <div id="v2WakeStatusOutput" class="tool-log-table">（空）</div>
 
 </div></details>
-<details class="settings-group"><summary>初始提示词（预写某个群/私聊的环境，只在 AI 首次唤醒时看一次）</summary><div class="settings-content">
+<details class="settings-group"><summary>初始提示词（预写某个频道/私聊的环境，只在 AI 首次唤醒时看一次）</summary><div class="settings-content">
       <div class="meta" style="margin-bottom:8px">
         在这里提前告诉 AI「这个群是什么圈子、什么氛围、聊什么、有什么忌讳」。AI 只在<b>该会话的第一次唤醒</b>时收到一次，
         之后不会重复注入（那时它已经在会话上下文里了）；AI 读不到也改不了这份设置。
@@ -2249,7 +2249,7 @@ button:active:not(:disabled) {
 </div></details>
 <details class="settings-group"><summary>白名单会话快速选择</summary><div class="settings-content">
       <div class="row">
-        <select id="v2SessionSelect" style="flex:1"><option value="">选择白名单群/私聊…</option></select>
+        <select id="v2SessionSelect" style="flex:1"><option value="">选择白名单频道/私聊…</option></select>
         <button id="v2SessionRefresh" class="small">刷新</button>
       </div>
 
@@ -2393,8 +2393,8 @@ button:active:not(:disabled) {
       <table>
         <tr><th>工具</th><th>说明</th></tr>
         <tr><td>chat_get_group_members</td><td>频道成员（只读，频道 id 必须白名单）</td></tr>
-        <tr><td>chat_send_group_message</td><td>发群消息；可选 <code>replyToMessageId</code> 引用/回复</td></tr>
-        <tr><td>chat_reply</td><td>专用“引用/回复”：在群里引用某条消息并发送文本</td></tr>
+        <tr><td>chat_send_group_message</td><td>发频道消息；可选 <code>replyToMessageId</code> 引用/回复</td></tr>
+        <tr><td>chat_reply</td><td>专用“引用/回复”：在频道里引用某条消息并发送文本</td></tr>
         <tr><td>chat_send_private_message</td><td>发私聊；可选 <code>replyToMessageId</code> 引用/回复</td></tr>
         <tr><td>chat_slang_query</td><td>查询已确认黑话/梗/网络表达（只读）</td></tr>
         <tr><td>chat_slang_submit</td><td>AI 提交陌生词/黑话给管理员筛选</td></tr>
@@ -2472,7 +2472,7 @@ button:active:not(:disabled) {
       <h2>测试发送</h2>
       <div class="row">
         <select id="tsKind" style="width:100px">
-          <option value="group">群</option>
+          <option value="group">频道</option>
           <option value="private">私聊</option>
         </select>
         <input type="text" id="tsId" placeholder="频道 id / 用户 id" style="width:140px">
@@ -2502,7 +2502,7 @@ button:active:not(:disabled) {
       <div class="meta">直接向指定聊天会话的 DSH agent 投递一条“后台控制端提醒”，用于给 AI 引导/提醒；该消息不是群友消息。二代模式（reserved2）下会自动附带会话令牌和二代工具协议说明，AI 的文本输出不会自动转发，发言需通过发送工具。</div>
       <div class="row" style="margin-top:10px">
         <select id="aiNotifyKind" style="width:110px">
-          <option value="group">群</option>
+          <option value="group">频道</option>
           <option value="private">私聊</option>
         </select>
         <input type="text" id="aiNotifyId" placeholder="频道 id / 用户 id" style="width:180px">
@@ -2550,7 +2550,7 @@ button:active:not(:disabled) {
         <span><i class="mixed"></i>跨时段</span>
       </div>
       <div class="meta" id="usageChartNote" style="margin-top:6px"></div>
-      <h3 class="usage-h3">按会话（群 / 私聊）</h3>
+      <h3 class="usage-h3">按会话（频道 / 私聊）</h3>
       <div class="tool-log-table" id="usageConversations">加载中…</div>
       <h3 class="usage-h3">逐轮花费 <span class="meta" id="usageTurnScope">—</span></h3>
       <div class="row usage-controls">
@@ -2939,11 +2939,11 @@ async function refreshSessions() {
     const s = await api('/api/sessions');
     const box = document.getElementById('sessionList');
     document.getElementById('metricSessions').textContent = s.sessions.length;
-    if (!s.sessions.length) { box.innerHTML = '<div class="empty-state"><strong>还没有会话</strong><p>白名单中的群或好友发来消息后，会话会显示在这里。</p></div>'; return; }
+    if (!s.sessions.length) { box.innerHTML = '<div class="empty-state"><strong>还没有会话</strong><p>白名单中的频道或用户发来消息后，会话会显示在这里。</p></div>'; return; }
     let html = '<table><tr><th>聊天会话</th><th>DSH 会话 ID</th><th>类型</th><th></th></tr>';
     for (const x of s.sessions) {
       const isP = x.key.startsWith('private:');
-      const type = isP ? '<span class="pill b">私聊</span>' : '<span class="pill g">群</span>';
+      const type = isP ? '<span class="pill b">私聊</span>' : '<span class="pill g">频道</span>';
       const ownerTag = x.owner ? ' <span class="pill r">管理员</span>' : '';
       html += `<tr><td>${esc(x.key)}${ownerTag}</td><td><code>${esc(x.sessionId)}</code></td><td>${type}</td><td><button class="small" data-reset-key="${esc(x.key)}">清除上下文</button></td></tr>`;
     }
@@ -3731,8 +3731,8 @@ async function loadV2SessionOptions() {
     const r = await api('/api/status');
     const groups = Array.isArray(r.allowGroups) ? r.allowGroups : [];
     const privates = Array.isArray(r.allowPrivate) ? r.allowPrivate : [];
-    const options = [{ value: '', label: '选择白名单群/私聊…' }];
-    for (const g of groups) options.push({ value: 'group:' + g, label: '群 ' + g });
+    const options = [{ value: '', label: '选择白名单频道/私聊…' }];
+    for (const g of groups) options.push({ value: 'group:' + g, label: '频道 ' + g });
     for (const p of privates) options.push({ value: 'private:' + p, label: '私聊 ' + p });
     sel.innerHTML = options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
     if (prev && options.some((o) => o.value === prev)) sel.value = prev;
@@ -3873,7 +3873,7 @@ async function refreshSocialStatus() {
     }
     if (prevSel && [...sel.options].some(o => o.value === prevSel)) sel.value = prevSel;
     let html = '摘要缓冲: ' + esc(buff) + '<br>状态:';
-    if (!stateEntries.length) html += ' 暂无（发过消息的群会显示状态）';
+    if (!stateEntries.length) html += ' 暂无（发过消息的频道会显示状态）';
     for (const [k, v] of stateEntries) {
       html += ` <span class="${phaseClass[v.phase] || 'pill'}">${esc(k)} · ${phaseLabel[v.phase] || esc(v.phase)}</span>`;
     }
@@ -4342,7 +4342,7 @@ const consolePages = {
   'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
   'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
   slang: ['黑话词库', '读懂群聊里的，言外之意。', '从候选到确认，让 AI 逐渐熟悉大家的表达习惯。'],
-  usage: ['令牌与花费', '每一次思考，都算得清楚。', '实时查看 AI 的 token 消耗与花费，可下钻到每个群、每个好友、每一轮对话。'],
+  usage: ['令牌与花费', '每一次思考，都算得清楚。', '实时查看 AI 的 token 消耗与花费，可下钻到每个频道、每个私聊、每一轮对话。'],
   access: ['访问与安全', '明确边界，安心连接。', '管理允许对话的对象、管理员权限与控制台访问凭证。'],
   operations: ['调试与运维', '让桥接，始终井然有序。', '测试消息、引导 AI，或维护桥接进程与会话工作区。'],
   reference: ['工具参考', '每一种能力，都清晰可见。', '查看桥接提供给 DSH 的 MCP 工具与用途。']
@@ -4401,7 +4401,7 @@ function updateOverview(status, modeLabel) {
   renderDiscordHealth(status.discord);
   document.getElementById('metricMode').textContent = modeLabel.replace('模式', '');
   document.getElementById('metricRole').textContent = '角色 · ' + (status.role || '默认人格');
-  document.getElementById('accessSummary').textContent = '管理员 ' + (status.ownerId || '未设置') + ' · ' + (status.allowGroups || []).length + ' 个白名单群 · ' + (status.allowPrivate || []).length + ' 位白名单好友';
+  document.getElementById('accessSummary').textContent = '管理员 ' + (status.ownerId || '未设置') + ' · ' + (status.allowGroups || []).length + ' 个白名单频道 · ' + (status.allowPrivate || []).length + ' 位白名单私聊用户';
   document.getElementById('lastUpdated').textContent = '状态同步于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
   document.getElementById('connectionAlert').hidden = true;
   const silent = status.roleMode === 'silent';
@@ -4754,7 +4754,7 @@ function renderUsageConversations(r) {
   const sym = r.symbol || '¥';
   usageConversationsCache = list;
   if (!list.length) {
-    box.innerHTML = '<div class="empty-state"><strong>还没有用量记录</strong><p>聊天会话产生一次 LLM 调用后，这里会按群 / 好友列出 token 与花费。新账本从桥接重启后开始记账。</p></div>';
+    box.innerHTML = '<div class="empty-state"><strong>还没有用量记录</strong><p>聊天会话产生一次 LLM 调用后，这里会按频道 / 私聊列出 token 与花费。新账本从桥接重启后开始记账。</p></div>';
     return;
   }
   const maxCost = Math.max(...list.map(x => Number(x.cost) || 0), 0);
@@ -4763,7 +4763,7 @@ function renderUsageConversations(r) {
     const key = String(c.key ?? '');
     const isInternal = key.startsWith('internal:');
     const type = isInternal ? '<span class="pill b">内部</span>'
-      : (key.startsWith('private:') ? '<span class="pill b">私聊</span>' : '<span class="pill g">群</span>');
+      : (key.startsWith('private:') ? '<span class="pill b">私聊</span>' : '<span class="pill g">频道</span>');
     const b = c.buckets || {};
     html += '<tr>'
       + `<td class="usage-key"><button class="usage-key-button" data-usage-key="${esc(key)}" aria-pressed="${key === usageSelectedKey}">${esc(key)}</button></td>`

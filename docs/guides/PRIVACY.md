@@ -49,7 +49,7 @@ node scripts/privacy-scan.mjs --json         # 机读输出（给 CI 用）
 {
   "comment": "本机专用；不入库",
   "deny": [
-    { "name": "我的真实群号", "pattern": "1001[0-9]{6}", "flags": "" }
+    { "name": "我的真实频道 id", "pattern": "12345678[0-9]{10}", "flags": "" }
   ],
   "denyFiles": ["notes/", "*.private.md"],
   "allowPaths": ["docs/guides/VOICE.md", "scripts/console-ui-"]

@@ -24,7 +24,7 @@ const tests = [
   // wake triggers 白名单、memory-update 边界、wait 租约归一化、md/黑话/表情/账本；
   // 本轮新增：/api/send/* 失败路径的作用域错误（R15）、reserved2 落库丢表情识别字段（R16）。
   'test-audit-regressions.mjs',
-  // 图片/表情链路（动图/表情包字段、CDN 优先与 emoji_id 兜底）+ 联网搜索
+  // 图片/表情链路（贴纸字段保留、附件/CDN 地址取图、IPv4 优先切换）+ 联网搜索
   // （DSH 同一路 DeepSeek 搜索、Bing RSS 兜底、凭据优先级与端点安全；
   //  本轮新增：空结果 note 必须在写缓存之前生成，否则缓存命中丢掉提示）。
   'test-media-search.mjs',

@@ -35,7 +35,7 @@ const GUARD_PATH = path.join(ROOT, 'plugins', 'discord-agent-presets', 'discord-
 const SIMULATION_PRESETS = ['dc-chat', 'dc-chat-v2'];
 
 /** 封闭 agent 的 preset：按设计**允许**完整本地工具面。 */
-const CLOSED_AGENT_PRESETS = ['qsh-closed'];
+const CLOSED_AGENT_PRESETS = ['dc-closed'];
 
 /**
  * 本地执行能力清单。
@@ -254,16 +254,16 @@ test('守卫仍放行 Discord MCP 命名空间与无害模型侧工具', async (
 });
 
 test('封闭 agent 的预设在创建后必须与仿真 preset 明确区分', () => {
-  // qsh-closed 由 ADR 0003 定义为**故意**拥有完整本地工具面：它的守卫只负责
+  // dc-closed 由 ADR 0003 定义为**故意**拥有完整本地工具面：它的守卫只负责
   // "哪些 Discord 动作可见"，不负责"本地工具权限边界"。
   //
-  // ⚠️ 这条断言初版是**恒真**的：qsh-closed 还不存在，`if (!exists) continue`
+  // ⚠️ 这条断言初版是**恒真**的：dc-closed 还不存在，`if (!exists) continue`
   // 直接跳过整个函数体，永远不会失败——一个永远不会失败的测试不如没有。
   // 现在改为显式记录"尚未创建"，并且一旦创建就执行真实断言。
   const present = CLOSED_AGENT_PRESETS.filter((id) => fs.existsSync(path.join(PRESETS_DIR, id)));
   if (present.length === 0) {
     // 不是失败，但必须让人看见"这条闸门还没被真正覆盖"。
-    console.log('  ⏭  qsh-closed 尚未创建（ADR 0003 待落地）；此项覆盖暂为空，不是通过。');
+    console.log('  ⏭  dc-closed 尚未创建（ADR 0003 待落地）；此项覆盖暂为空，不是通过。');
     return;
   }
   for (const id of present) {

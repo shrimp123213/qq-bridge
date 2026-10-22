@@ -280,14 +280,14 @@ const DISCORD_MESSAGE_ID = '字符串，照抄消息里的 messageId，不要转
   };
 }
 
-// 群成员列表：**换成 v2 形态**（key + token）。
+// 频道成员列表：**换成 v2 形态**（key + token）。
 //
 // 为什么不再沿用旧的无令牌版本：它是 dc-chat-v2 预设里唯一被点名的"拿用户 id"的途径
 // （见 dsh/agent-presets/dc-chat-v2/agent.cordis.yml 第 6 条），但旧版在 reserved2 下必然 403
 // —— 预设教模型用一个永远失败的工具，等于每次都白烧一步。改成 v2 后同一个名字在两种模式下都成立。
 server.tool(
   'chat_get_group_members',
-  `列出指定群的成员（只读）：用户 id、昵称、服务器昵称。等特定的人、要 @ 某个人、或需要确认谁在群里时用；用户 id 取返回里的 userId。只返回白名单群，且只读取桥接允许的会话。`,
+  `列出指定频道的成员（只读）：用户 id、昵称、服务器昵称。等特定的人、要 @ 某个人、或需要确认谁在频道里时用；用户 id 取返回里的 userId。只返回白名单群，且只读取桥接允许的会话。`,
   {
     key: z.string().describe('会话 key，格式 group:频道id'),
     token: z.string().optional().describe('会话令牌（见唤醒提示中的【会话令牌】；closed-agent 模式不需要）'),
@@ -302,16 +302,16 @@ server.tool(
       const data = await agentApi(`/api/socialV2/group-members?${q.toString()}`, token ? { headers: { 'x-agent-token': token } } : {});
       return { content: [{ type: 'text', text: serializeModelData(data) }] };
     } catch (error) {
-      return { content: [{ type: 'text', text: `获取群成员失败：${error?.message ?? error}` }], isError: true };
+      return { content: [{ type: 'text', text: `获取频道成员失败：${error?.message ?? error}` }], isError: true };
     }
   }
 );
 
 server.tool(
   'chat_send_group_message',
-  `向指定群发送一条纯文本消息；如需引用某条消息，可传 replyToMessageId（${DISCORD_MESSAGE_ID}），可先用 chat_get_recent_messages / chat_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 chat_send_message；reserved2 下调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。`,
+  `向指定频道发送一条纯文本消息；如需引用某条消息，可传 replyToMessageId（${DISCORD_MESSAGE_ID}），可先用 chat_get_recent_messages / chat_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 chat_send_message；reserved2 下调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。`,
   {
-    groupId: z.union([z.number(), z.string()]).describe('群 id（必须在白名单内）'),
+    groupId: z.union([z.number(), z.string()]).describe('频道 id（必须在白名单内）'),
     message: z.string().describe(`消息文本，纯文本，不要用 Markdown`),
     replyToMessageId: z.union([z.number(), z.string()]).optional().describe(`要引用/回复的消息 id（${DISCORD_MESSAGE_ID}，可选）`),
     token: z.string().optional().describe('二代会话令牌（reserved2 模式下必填；closed-agent 模式不需要）')
@@ -335,9 +335,9 @@ server.tool(
 
 server.tool(
   'chat_reply',
-  `在指定群里引用/回复某条消息，并发送一条文本。适合群消息很多、需要明确“我回的是哪条”时使用；replyToMessageId 是被引用消息的 id（${DISCORD_MESSAGE_ID}），可先用 chat_get_recent_messages / chat_get_unread_messages / chat_get_message_detail 查到具体消息内容和 id。发送前桥接会校验该 id 存在且属于当前会话。二代模式下这是你正常可用的引用工具，但不要每条都引用。只有以下情况才需要引用：① 你这条消息指向的人或消息并非最新一条别人的消息（也就是你在回更早的某条）；② 你连续几句话里不同消息指代的是不同的消息或不同的人。其他情况（上下文唯一、刚在接同一条最新消息）不要引用，别让对方猜，也别为了用工具而用。reserved2 下调用时必须携带会话令牌 token。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。`,
+  `在指定频道里引用/回复某条消息，并发送一条文本。适合频道消息很多、需要明确“我回的是哪条”时使用；replyToMessageId 是被引用消息的 id（${DISCORD_MESSAGE_ID}），可先用 chat_get_recent_messages / chat_get_unread_messages / chat_get_message_detail 查到具体消息内容和 id。发送前桥接会校验该 id 存在且属于当前会话。二代模式下这是你正常可用的引用工具，但不要每条都引用。只有以下情况才需要引用：① 你这条消息指向的人或消息并非最新一条别人的消息（也就是你在回更早的某条）；② 你连续几句话里不同消息指代的是不同的消息或不同的人。其他情况（上下文唯一、刚在接同一条最新消息）不要引用，别让对方猜，也别为了用工具而用。reserved2 下调用时必须携带会话令牌 token。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。`,
   {
-    groupId: z.union([z.number(), z.string()]).describe('群 id（必须在白名单内）'),
+    groupId: z.union([z.number(), z.string()]).describe('频道 id（必须在白名单内）'),
     replyToMessageId: z.union([z.number(), z.string()]).describe(`被引用/回复的消息 id（${DISCORD_MESSAGE_ID}）`),
     message: z.string().describe(`要发送的文本，纯文本，不要用 Markdown`),
     token: z.string().optional().describe('二代会话令牌（reserved2 模式下必填；closed-agent 模式不需要）')
@@ -502,9 +502,9 @@ server.tool(
 
 server.tool(
   'chat_send_burst',
-  '在指定群分多条发送消息（二代仿真模式专用），桥接会按真人化随机间隔发送。暂不支持引用，需要引用请用 chat_reply。注意：数组里的每个字符串就是一条消息，字符串内部不要用空格分隔中文短句，需要多条请用数组元素；每条消息要读起来完整，不要把同一句话拆到两条里。',
+  '在指定频道分多条发送消息（二代仿真模式专用），桥接会按真人化随机间隔发送。暂不支持引用，需要引用请用 chat_reply。注意：数组里的每个字符串就是一条消息，字符串内部不要用空格分隔中文短句，需要多条请用数组元素；每条消息要读起来完整，不要把同一句话拆到两条里。',
   {
-    groupId: z.union([z.number(), z.string()]).describe('群 id（必须在白名单内）'),
+    groupId: z.union([z.number(), z.string()]).describe('频道 id（必须在白名单内）'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
     messages: z.union([z.array(z.string()).min(1), z.string()]).describe('要发送的消息数组，每条为纯文本；也兼容传入 JSON 数组字符串')
   },
@@ -550,7 +550,7 @@ server.tool(
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
     messages: z.union([z.string(), z.array(z.string()).min(1)]).describe('要发送的内容：字符串=一条；数组=分多条'),
     replyToMessageId: z.union([z.number(), z.string()]).optional().describe(`要引用/回复的消息 id（${DISCORD_MESSAGE_ID}，可选）`),
-    atUserId: z.union([z.number(), z.string()]).optional().describe('要 @ 的群成员的用户 id（群聊中用于点名某个人；与引用二选一即可，不要滥用）'),
+    atUserId: z.union([z.number(), z.string()]).optional().describe('要 @ 的成员的用户 id（频道里用于点名某个人；与引用二选一即可，不要滥用）'),
     gapMode: z.enum(['auto', 'fixed', 'byLength']).optional().describe('auto=桥接随机；fixed=固定间隔；byLength=按字数计算'),
     gapMs: z.number().optional().describe('fixed 模式下的统一间隔（毫秒）'),
     gaps: z.array(z.number()).optional().describe('fixed 模式下逐条间隔（长度=条数-1）')

@@ -39,18 +39,18 @@ test('snowflake ids above 2^53 stay exact strings', () => {
 test('initial owner private is closed-agent and all other channels simulate', () => {
   const router = new SessionRouter({ ownerId });
   assert.equal(router.modeFor(ownerKey), 'closed-agent');
-  assert.equal(router.presetFor(ownerKey), 'qsh-closed');
+  assert.equal(router.presetFor(ownerKey), 'dc-closed');
   assert.equal(router.modeFor('private:9'), 'simulation');
   assert.equal(router.modeFor('group:9'), 'simulation');
-  assert.equal(router.presetFor('group:9'), 'qsh-sim');
+  assert.equal(router.presetFor('group:9'), 'dc-sim');
   // Whatever this constructor emits must be loadable by it. Keeping the raw
   // legacy `reserved2` spelling in `defaults.mode` next to the canonical
-  // `qsh-sim` preset produces a state this very loader rejects (the legacy
+  // `dc-sim` preset produces a state this very loader rejects (the legacy
   // spelling only accepts the legacy preset), so the persisted default is
   // canonicalised on the way out.
   const reloaded = new SessionRouter({ ownerId, state: router.snapshot() });
   assert.equal(reloaded.defaultMode, router.defaultMode);
-  assert.equal(reloaded.presetFor('group:9'), 'qsh-sim');
+  assert.equal(reloaded.presetFor('group:9'), 'dc-sim');
   assert.equal(reloaded.policyFingerprint('group:9'), router.policyFingerprint('group:9'));
 });
 
@@ -76,31 +76,31 @@ test('invalid ownerId is rejected rather than silently trusted', () => {
 
 test('closed-agent cannot be the global default', () => {
   const state = createInitialConversationState(ownerId);
-  state.defaults = { mode: 'closed-agent', preset: 'qsh-closed' };
+  state.defaults = { mode: 'closed-agent', preset: 'dc-closed' };
   assert.throws(() => new SessionRouter({ ownerId, state }), /defaults must remain simulation/);
 });
 
 test('closed-agent cannot be assigned to a group', () => {
-  const state = stateWith('group:8', { mode: 'closed-agent', preset: 'qsh-closed' });
+  const state = stateWith('group:8', { mode: 'closed-agent', preset: 'dc-closed' });
   assert.throws(() => new SessionRouter({ ownerId, state }), /restricted to the owner/);
 });
 
 test('closed-agent cannot be assigned to another private conversation', () => {
-  const state = stateWith('private:8', { mode: 'closed-agent', preset: 'qsh-closed' });
+  const state = stateWith('private:8', { mode: 'closed-agent', preset: 'dc-closed' });
   assert.throws(() => new SessionRouter({ ownerId, state }), /restricted to the owner/);
 });
 
 test('closed-agent is rejected when no owner is configured', () => {
-  const state = stateWith(ownerKey, { mode: 'closed-agent', preset: 'qsh-closed' });
+  const state = stateWith(ownerKey, { mode: 'closed-agent', preset: 'dc-closed' });
   assert.throws(() => new SessionRouter({ state }), /restricted to the owner/);
 });
 
 test('missing and unknown modes fail closed at load', () => {
   for (const policy of [
-    { preset: 'qsh-sim' },
-    { mode: 'reserved2', preset: 'qsh-sim' },
-    { mode: 'mystery', preset: 'qsh-sim' },
-    { mode: { toString: () => 'closed-agent' }, preset: 'qsh-closed' },
+    { preset: 'dc-sim' },
+    { mode: 'reserved2', preset: 'dc-sim' },
+    { mode: 'mystery', preset: 'dc-sim' },
+    { mode: { toString: () => 'closed-agent' }, preset: 'dc-closed' },
   ]) {
     assert.throws(() => new SessionRouter({ ownerId, state: stateWith('group:8', policy) }));
   }
@@ -111,17 +111,17 @@ test('missing, null, unknown, and cross-mode presets fail closed', () => {
     { mode: 'simulation' },
     { mode: 'simulation', preset: null },
     { mode: 'simulation', preset: 'standard' },
-    { mode: 'simulation', preset: 'qsh-closed' },
+    { mode: 'simulation', preset: 'dc-closed' },
   ]) {
     assert.throws(() => new SessionRouter({ ownerId, state: stateWith('group:8', policy) }));
   }
   assert.throws(() => new SessionRouter({ ownerId,
-    state: stateWith(ownerKey, { mode: 'closed-agent', preset: 'qsh-sim' }) }));
+    state: stateWith(ownerKey, { mode: 'closed-agent', preset: 'dc-sim' }) }));
 });
 
 test('defaults also require known mode and preset', () => {
   for (const defaults of [
-    { preset: 'qsh-sim' },
+    { preset: 'dc-sim' },
     { mode: 'simulation' },
     { mode: 'simulation', preset: 'standard' },
   ]) {
@@ -138,15 +138,15 @@ test('mode, preset, model, and effort resolve independently per conversation', (
   state.conversations[ownerKey].model = 'owner-model';
   state.conversations[ownerKey].reasoningEffort = 'high';
   state.conversations['group:8'] = {
-    mode: 'simulation', preset: 'qsh-sim-v2', model: null, updatedBy: 'console',
+    mode: 'simulation', preset: 'dc-sim-v2', model: null, updatedBy: 'console',
   };
   const router = new SessionRouter({ ownerId, state });
   assert.deepEqual([router.modeFor(ownerKey), router.presetFor(ownerKey),
     router.modelFor(ownerKey), router.effortFor(ownerKey)],
-  ['closed-agent', 'qsh-closed', 'owner-model', 'high']);
+  ['closed-agent', 'dc-closed', 'owner-model', 'high']);
   assert.deepEqual([router.modeFor('group:8'), router.presetFor('group:8'),
     router.modelFor('group:8'), router.effortFor('group:8')],
-  ['simulation', 'qsh-sim-v2', null, 'low']);
+  ['simulation', 'dc-sim-v2', null, 'low']);
   assert.equal(router.modelFor('private:8'), 'default-model');
 });
 
@@ -172,7 +172,7 @@ test('a policy change reports only its canonical conversation key', () => {
   const ownerBefore = router.policyFingerprint(ownerKey);
   const otherBefore = router.policyFingerprint('group:9');
   const result = router.setConversation('group:0008', {
-    mode: 'simulation', preset: 'qsh-sim-v2', model: 'small', reasoningEffort: 'low',
+    mode: 'simulation', preset: 'dc-sim-v2', model: 'small', reasoningEffort: 'low',
     updatedBy: 'console',
   });
   assert.deepEqual(result.changedKeys, ['group:8']);
@@ -185,12 +185,12 @@ test('model and effort edits each change only that conversation fingerprint', ()
   const router = new SessionRouter({ ownerId });
   const groupBefore = router.policyFingerprint('group:8');
   const first = router.setConversation(ownerKey, {
-    mode: 'closed-agent', preset: 'qsh-closed', model: 'm1', reasoningEffort: null,
+    mode: 'closed-agent', preset: 'dc-closed', model: 'm1', reasoningEffort: null,
     updatedBy: 'command:' + ownerKey,
   });
   const afterModel = router.policyFingerprint(ownerKey);
   const second = router.setConversation(ownerKey, {
-    mode: 'closed-agent', preset: 'qsh-closed', model: 'm1', reasoningEffort: 'high',
+    mode: 'closed-agent', preset: 'dc-closed', model: 'm1', reasoningEffort: 'high',
     updatedBy: 'console',
   });
   assert.deepEqual(first.changedKeys, [ownerKey]);
@@ -203,7 +203,7 @@ test('metadata-only edits do not restart a conversation', () => {
   const router = new SessionRouter({ ownerId });
   const fingerprint = router.policyFingerprint(ownerKey);
   const result = router.setConversation(ownerKey, {
-    mode: 'closed-agent', preset: 'qsh-closed', model: null,
+    mode: 'closed-agent', preset: 'dc-closed', model: null,
     reasoningEffort: null, updatedBy: 'console', note: 'renamed',
   });
   assert.deepEqual(result.changedKeys, []);
@@ -214,7 +214,7 @@ test('rejected update leaves all conversation policies unchanged', () => {
   const router = new SessionRouter({ ownerId });
   const before = router.snapshot();
   assert.throws(() => router.setConversation('group:8', {
-    mode: 'closed-agent', preset: 'qsh-closed', updatedBy: 'console',
+    mode: 'closed-agent', preset: 'dc-closed', updatedBy: 'console',
   }), /restricted to the owner/);
   assert.deepEqual(router.snapshot(), before);
 });
@@ -266,7 +266,7 @@ test('unknown legacy mode and unsupported state versions fail closed', () => {
 test('aliased duplicate keys are rejected rather than overwriting policy', () => {
   const state = createInitialConversationState(ownerId);
   state.conversations['private:042'] = {
-    mode: 'simulation', preset: 'qsh-sim', updatedBy: 'console',
+    mode: 'simulation', preset: 'dc-sim', updatedBy: 'console',
   };
   assert.throws(() => new SessionRouter({ ownerId, state }), /Duplicate conversation key/);
 });
@@ -281,7 +281,7 @@ test('explicit null or damaged state never triggers owner first-run privileges',
 
 test('persisted conversation without a valid updatedBy is rejected', () => {
   const state = createInitialConversationState(ownerId, { closedAgentEnabled: false });
-  state.conversations['group:8'] = { mode: 'simulation', preset: 'qsh-sim' };
+  state.conversations['group:8'] = { mode: 'simulation', preset: 'dc-sim' };
   assert.throws(() => new SessionRouter({ ownerId, state }), /updatedBy/);
   state.conversations['group:8'].updatedBy = 'command:private:8';
   assert.throws(() => new SessionRouter({ ownerId, state }), /updatedBy/);
@@ -292,7 +292,7 @@ test('setConversation requires a live actor and leaves state untouched on reject
   const before = router.snapshot();
   for (const updatedBy of [undefined, '', 'migration', 'first-run', 'command:private:8']) {
     assert.throws(() => router.setConversation('group:8', {
-      mode: 'simulation', preset: 'qsh-sim-v2', updatedBy,
+      mode: 'simulation', preset: 'dc-sim-v2', updatedBy,
     }), /updatedBy/);
     assert.deepEqual(router.snapshot(), before);
   }
@@ -302,7 +302,7 @@ test('setConversation returns actor, time, and before/after for a valid owner co
   const router = new SessionRouter({ ownerId, now: () => 1_750_000_000_000 });
   const before = router.policyFor(ownerKey);
   const result = router.setConversation(ownerKey, {
-    mode: 'simulation', preset: 'qsh-sim', updatedBy: 'command:' + ownerKey,
+    mode: 'simulation', preset: 'dc-sim', updatedBy: 'command:' + ownerKey,
   });
   assert.deepEqual(result.changedKeys, [ownerKey]);
   assert.deepEqual(result.auditEvent, {
@@ -353,7 +353,7 @@ test('invalid audit clock cannot commit a policy change', () => {
   const router = new SessionRouter({ ownerId, now: () => Number.NaN });
   const before = router.snapshot();
   assert.throws(() => router.setConversation(ownerKey, {
-    mode: 'simulation', preset: 'qsh-sim', updatedBy: 'console',
+    mode: 'simulation', preset: 'dc-sim', updatedBy: 'console',
   }), /audit time/);
   assert.deepEqual(router.snapshot(), before);
   assert.throws(() => router.deleteConversation(ownerKey, { updatedBy: 'console' }), /audit time/);

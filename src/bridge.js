@@ -64,7 +64,7 @@ const BRIDGE_LOG = path.join(STATE_DIR, 'bridge.log');
 /**
  * 模式拼写的**唯一**归一入口（输入边界）。
  *
- * `simulation` 是规范名（QSH_PLAN.md §2.1：对用户只暴露 `closed-agent` / `simulation`），
+ * `simulation` 是规范名（迁移规划：对用户只暴露 `closed-agent` / `simulation`），
  * `chat` / `reserved` / `reserved2` 是历史拼写 —— 必须继续被**接受**（线上桥接持久化的全局值
  * 就是 `reserved2`），但进程内部一律用历史拼写存储与比较：`currentMode === 'reserved2'` 这类
  * 判断遍布发送闸门、定时器与 preset 解析，把规范名直接塞进 `currentMode` 会让它们全部变成假。
@@ -2829,7 +2829,7 @@ async function main() {
           // 都不能给到会话级主体，否则 A 群的 AI 能读到 B 群的内容。
           // 判定「是不是智能体调用」必须同时看 x-agent-call：无令牌的智能体调用
           // （旧只读工具的模式探测）不带 x-agent-token，但它同样**绝不能**拿到管理端字段
-          // —— ownerId / 白名单 / activity（含其它群的发言片段）是跨群管理信息。
+          // —— ownerId / 白名单 / activity（含其它频道的发言片段）是跨频道管理信息。
           // 只认 token 会让这类请求落到下面的完整对象上，等于把 A 群的 AI 变成管理端。
           if (req.headers['x-agent-token'] || req.headers['x-agent-call'] !== undefined) {
             sendJson({
