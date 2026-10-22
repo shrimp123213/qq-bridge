@@ -63,7 +63,7 @@ await test('#22 refreshMode 采纳控制台刚写入的 user 层（否则 5 秒�
       result: { ok: true, value: { namespaces: [{ ns: 'qq-mode', value: { mode: 'chat' }, user: { ownerQQ: '40004' } }] } }
     });
     await h.refreshMode();
-    assert.equal(h.cfg.ownerQQ, 40004, 'user 层显式 ownerQQ 必须生效');
+    assert.equal(h.cfg.ownerQQ, '40004', 'user 层显式 ownerQQ 必须生效');
   } finally { await h.close(); }
 });
 

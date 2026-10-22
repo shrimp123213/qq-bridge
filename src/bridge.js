@@ -629,20 +629,43 @@ function sanitizeRoleName(name) {
   return String(name ?? '').replace(/[^\w\u4e00-\u9fff-]/g, '');
 }
 
-// 管理员 QQ（ownerQQ）规范化：空值=未设置；必须是正整数 QQ 号。
+/**
+ * ID（QQ 号 / 群号，或其它平台的数字 ID，例如 Discord 的 snowflake）的规范形式：
+ * 去掉前导零的十进制数字字符串，1~20 位、不为 0；不合法返回 null。
+ *
+ * 一律按字符串处理、**不转 Number**：Discord 的 snowflake 超过 2^53，转成 Number
+ * 会被截成另一个 ID，白名单比对、会话 key、发送目标都会悄悄指向别人。
+ * 已经是 Number 但超出安全整数范围的值（JSON.parse 时就已经被截断了）同样视为不合法。
+ */
+function canonicalId(value) {
+  if (typeof value === 'number' && !Number.isSafeInteger(value)) return null;
+  const m = /^0*([1-9]\d{0,19})$/.exec(String(value ?? '').trim());
+  return m ? m[1] : null;
+}
+
+/** config.json 里写成 JSON 数字、又超过 2^53 的 ID：读进来时已经被截断，只能报错让人改成字符串。 */
+function assertNotTruncatedId(value, field) {
+  if (typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)) {
+    throw new Error(`config.json 的 ${field} 里有超过 2^53 的数字 ID（读到的是 ${value}，已经被 JSON 截断）。`
+      + '这类 ID（例如 Discord 的）请写成字符串，加上引号。');
+  }
+}
+
+// 管理员 QQ（ownerQQ）规范化：空值=未设置；必须是正整数 ID。返回规范化后的字符串。
 function normalizeOwnerQQ(value) {
   if (value === undefined || value === null) return null;
+  assertNotTruncatedId(value, 'ownerQQ');
   const s = String(value).trim();
   if (!s) return null;
-  if (!/^\d+$/.test(s)) throw new Error('ownerQQ 必须是 QQ 号（正整数）');
-  const n = Number(s);
-  if (!Number.isSafeInteger(n) || n <= 0) throw new Error('ownerQQ 必须是 QQ 号（正整数）');
-  return n;
+  const id = canonicalId(s);
+  if (!id) throw new Error('ownerQQ 必须是 QQ 号（正整数）');
+  return id;
 }
 
 // 白名单/黑名单值规范化：只接受字符串或数字数组，非数组按空列表处理（fail-closed 语义由调用方决定）。
 function normalizeIdList(value) {
   if (!Array.isArray(value)) return [];
+  for (const v of value) assertNotTruncatedId(v, '白名单/黑名单');
   return value.map((v) => String(v).trim()).filter((v) => /^\d+$/.test(v));
 }
 
@@ -1365,9 +1388,8 @@ function allowed(kind, id, cfg) {
 function canonicalV2Key(key) {
   const m = /^(group|private):(\d+)$/.exec(String(key ?? '').trim());
   if (!m) return null;
-  const id = Number(m[2]);
-  if (!Number.isSafeInteger(id) || id <= 0) return null;
-  return `${m[1]}:${id}`;
+  const id = canonicalId(m[2]);
+  return id ? `${m[1]}:${id}` : null;
 }
 
 const APPROVE_WORDS = new Set(['通过', '同意', '允许', '批准', 'yes', 'y', 'approve', 'ok']);
@@ -2600,7 +2622,9 @@ async function main() {
   function isSessionAllowedInCurrentMode(key) {
     const m = /^(group|private):(\d+)$/.exec(key);
     if (!m) return false;
-    return modeAllowed(key, m[1], Number(m[2]), cfg, currentMode);
+    const id = canonicalId(m[2]);
+    if (!id) return false;
+    return modeAllowed(key, m[1], id, cfg, currentMode);
   }
 
   function sessionPolicy(key) {
@@ -2724,7 +2748,7 @@ async function main() {
           const item = items[i];
           try {
             const [kind, idStr] = key.split(':');
-            const id = Number(idStr);
+            const id = canonicalId(idStr);
             if (!modeAllowed(key, kind, id, cfg, currentMode)) {
               log(`补投跳过未授权会话 ${key}（当前模式 ${currentMode}）`);
               continue;
@@ -3767,17 +3791,18 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/whitelist') {
           const body = await readBody();
-          const toNum = (arr) => Array.isArray(arr) ? [...new Set(arr.map((x) => Number(String(x).trim())).filter((n) => Number.isFinite(n)))] : undefined;
+          // ID 一律存成规范化字符串：转 Number 会把超过 2^53 的 ID（如 Discord snowflake）截成别的号码。
+          const toIds = (arr) => Array.isArray(arr) ? [...new Set(arr.map((x) => canonicalId(x)).filter(Boolean))] : undefined;
           const configFile = path.join(ROOT, 'config.json');
           // fail-fast：配置文件损坏时直接 500，绝不回写，避免把整个配置清成只剩 allow/deny/ownerQQ
           const file = readConfigObject(configFile);
           const allow = {
-            private: toNum(body.allow?.private) ?? (file.allow?.private ?? []),
-            groups: toNum(body.allow?.groups) ?? (file.allow?.groups ?? [])
+            private: toIds(body.allow?.private) ?? (file.allow?.private ?? []),
+            groups: toIds(body.allow?.groups) ?? (file.allow?.groups ?? [])
           };
           const deny = {
-            private: toNum(body.deny?.private) ?? (file.deny?.private ?? []),
-            groups: toNum(body.deny?.groups) ?? (file.deny?.groups ?? [])
+            private: toIds(body.deny?.private) ?? (file.deny?.private ?? []),
+            groups: toIds(body.deny?.groups) ?? (file.deny?.groups ?? [])
           };
           // 管理员 QQ 可在控制台输入；空值=清除管理员（fail-closed），非法值拒绝写入。
           let ownerQQ = cfg.ownerQQ ?? null;
@@ -3943,9 +3968,9 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/test-send') {
           const body = await readBody();
           const kind = body.kind === 'private' ? 'private' : 'group';
-          const id = Number(body.id);
+          const id = canonicalId(body.id);
           const message = String(body.message ?? '').trim();
-          if (!Number.isFinite(id) || id <= 0) { sendJson({ ok: false, error: '目标 id 无效' }, 400); return; }
+          if (!id) { sendJson({ ok: false, error: '目标 id 无效' }, 400); return; }
           if (!message) { sendJson({ ok: false, error: '消息不能为空' }, 400); return; }
           if (SENSITIVE_RE.test(message)) { sendJson({ ok: false, error: '消息含敏感信息，已阻止发送' }, 403); return; }
           if (!allowed(kind, id, cfg)) { sendJson({ ok: false, error: `目标不在白名单内（${kind} ${id}），请先加入白名单` }, 403); return; }
@@ -4058,8 +4083,8 @@ async function main() {
             return;
           }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id) {
             sendJson({ ok: false, error: 'id 无效' }, 400);
             return;
           }
@@ -4714,8 +4739,8 @@ async function main() {
           const keyMatch = /^(group|private):(\d+)$/.exec(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -4847,8 +4872,8 @@ async function main() {
             return;
           }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -4970,8 +4995,8 @@ async function main() {
           const keyMatch = /^(group|private):(\d+)$/.exec(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -5082,8 +5107,8 @@ async function main() {
           const keyMatch = /^(group|private):(\d+)$/.exec(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '当前模式不允许操作该会话' }, 403);
             return;
           }
@@ -5285,8 +5310,9 @@ async function main() {
           }
           const key = String(body.target ?? body.key ?? '').trim();
           const parsedTarget = parseTargetKey(key);
-          if (!parsedTarget) { sendJson({ ok: false, error: 'target 格式应为 group:群号 或 private:QQ号' }, 400); return; }
-          if (!modeAllowed(key, parsedTarget.kind, Number(parsedTarget.id), cfg, currentMode)) {
+          const targetId = parsedTarget ? canonicalId(parsedTarget.id) : null;
+          if (!targetId) { sendJson({ ok: false, error: 'target 格式应为 group:群号 或 private:QQ号' }, 400); return; }
+          if (!modeAllowed(key, parsedTarget.kind, targetId, cfg, currentMode)) {
             const a = cfg.allow ?? {};
             sendJson({
               ok: false,
@@ -5385,8 +5411,8 @@ async function main() {
           const keyMatch = /^(group|private):(\d+)$/.exec(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -5456,8 +5482,8 @@ async function main() {
           const keyMatch = /^(group|private):(\d+)$/.exec(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -6107,7 +6133,7 @@ async function main() {
           const keyMatch = /^(group|private):(\d+)$/.exec(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const id = canonicalId(keyMatch[2]);
           try {
             const st = getSocialV2State(key);
             const found = (st.recentMessages || []).find((m) => m && (String(m.seq) === messageId || (m.messageId && String(m.messageId) === messageId)));
@@ -6168,8 +6194,8 @@ async function main() {
             return;
           }
           const kind = keyMatch[1];
-          const num = Number(keyMatch[2]);
-          if (!Number.isFinite(num) || num <= 0 || !modeAllowed(key, kind, num, cfg, currentMode)) {
+          const num = canonicalId(keyMatch[2]);
+          if (!num || !modeAllowed(key, kind, num, cfg, currentMode)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
           }
@@ -6303,11 +6329,11 @@ async function main() {
           // 于是「管理员在私聊里让 AI 看看某群成员」会 403 —— 那是旧工具本来支持的能力，
           // 属于这次改动不该带走的回归。所以 closed-agent 下按**同样严格的白名单**放行群读取。
           const groupMembersAllowed = currentMode === 'closed-agent'
-            ? allowed('group', Number(groupMatch[1]), cfg)
+            ? allowed('group', canonicalId(groupMatch[1]), cfg)
             : v2SessionAllowed(key);
           if (!groupMembersAllowed) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getGroupMembers')) { sendJson({ ok: false, error: '工具未启用：qq_get_group_members' }, 403); return; }
-          const groupId = Number(groupMatch[1]);
+          const groupId = canonicalId(groupMatch[1]);
           try {
             // WS 挂了时适配层会改走 HTTP 兜底（与表情库同步同一条原则）。
             const response = await platform.getGroupMemberListWithFallback(groupId);
@@ -6575,8 +6601,8 @@ async function main() {
             return;
           }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
           }
@@ -6604,8 +6630,8 @@ async function main() {
             return;
           }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
           }
@@ -6673,8 +6699,8 @@ async function main() {
           const keyMatch = /^(group|private):(\d+)$/.exec(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式无效' }, 400); return; }
           const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          const id = canonicalId(keyMatch[2]);
+          if (!id || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -9365,13 +9391,8 @@ async function main() {
     const hit = replyInfoCache.get(cacheKey);
     if (hit && Date.now() - hit.ts < (hit.info ? REPLY_INFO_TTL_MS : REPLY_NEGATIVE_TTL_MS)) return hit.info;
     try {
-      const numericId = Number(messageId);
-      if (!Number.isSafeInteger(numericId)) {
-        log(`引用消息 id 超出安全整数范围，拒绝解析: ${messageId}`);
-        replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
-        return null;
-      }
-      const quoted = await platform.getMessage(numericId);
+      // 消息 id 原样（字符串）交给平台：id 格式是平台的事（QQ 的校验见 platform.getMessage）。
+      const quoted = await platform.getMessage(String(messageId));
       if (!quoted) {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
@@ -10921,7 +10942,7 @@ async function main() {
     let sender = senderId;
     if (kind === 'group' && senderId) {
       try {
-        sender = await resolveGroupMemberName(Number(id), senderId) || senderId;
+        sender = await resolveGroupMemberName(id, senderId) || senderId;
       } catch {}
     }
     const targetIsSelf = !!targetId && selfId != null && String(targetId) === String(selfId);

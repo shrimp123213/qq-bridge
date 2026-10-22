@@ -3155,7 +3155,8 @@ document.getElementById('dshEffortSave').addEventListener('click', async () => {
 document.getElementById('silentOn').addEventListener('click', async () => { await api('/api/role-mode', 'POST', { mode: 'silent' }); refresh(); });
 document.getElementById('silentOff').addEventListener('click', async () => { await api('/api/role-mode', 'POST', { mode: 'active' }); refresh(); });
 document.getElementById('wlSave').addEventListener('click', async () => {
-  const parse = (s) => s.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+  // ID 保持字符串：转 Number 会把超过 2^53 的 ID（如 Discord snowflake）截成别的号码
+  const parse = (s) => s.split(/[,，\s]+/).map(x => x.trim()).filter(x => /^\d+$/.test(x));
   const r = await api('/api/whitelist', 'POST', {
     allow: { private: parse(document.getElementById('wlPrivate').value), groups: parse(document.getElementById('wlGroups').value) },
     deny: { private: parse(document.getElementById('dnPrivate').value), groups: parse(document.getElementById('dnGroups').value) },

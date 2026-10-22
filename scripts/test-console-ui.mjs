@@ -139,7 +139,7 @@ try {
 
   await test('Whitelist numeric parsing and security contracts', async () => {
     for (const [id, value] of Object.entries({ wlGroups: '123456789，100003', wlPrivate: '100001 100002', dnGroups: '800001,800002', dnPrivate: '900001', ownerQQ: '100001' })) await fill(id, value);
-    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { allow: { private: [100001, 100002], groups: [123456789, 100003] }, deny: { private: [900001], groups: [800001, 800002] }, ownerQQ: '100001' });
+    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { allow: { private: ['100001', '100002'], groups: ['123456789', '100003'] }, deny: { private: ['900001'], groups: ['800001', '800002'] }, ownerQQ: '100001' });
     await check('secInterceptNotify', false);
     assert.deepEqual(await clickWrite('#secSave', '/api/security'), { interceptNotify: false });
   });

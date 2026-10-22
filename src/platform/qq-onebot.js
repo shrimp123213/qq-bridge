@@ -47,8 +47,11 @@
 //   mface{summary,…}、face{id}、record、video、file{name}、json、markdown{text|content}、
 //   forward{id}。其它平台的适配层把自己的消息转成这些段即可。
 //
-// ⚠️ 查询结果（成员、合并转发、图片、表情、收藏表情）仍是 OneBot v11 的形状，会话 key 也
-// 仍是 `group:<数字>` / `private:<数字>`。ID 格式是下一步。
+// ID 格式：会话对象与用户的 id 是 1~20 位十进制数字字符串（bridge.js 去掉前导零后用作
+// `group:<id>` / `private:<id>` 会话 key），超过 2^53 也行（例如 Discord snowflake）——
+// bridge.js 不会把它们转成 Number。消息 id 是不透明字符串，格式由各平台自己校验。
+//
+// ⚠️ 查询结果（成员、合并转发、图片、表情、收藏表情）仍是 OneBot v11 的形状。
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } from '../snowluma-conn.js';
 
@@ -231,7 +234,13 @@ export function createQQPlatform({ cfg, log, configPath }) {
   }
 
   async function getMessage(messageId) {
-    const raw = await bot.getMessage(messageId);
+    // QQ 的消息 id 是（可能为负的）整数；超出安全整数范围的转成 Number 会变成另一条消息的 id。
+    const numericId = Number(messageId);
+    if (!Number.isSafeInteger(numericId)) {
+      log(`引用消息 id 超出安全整数范围，拒绝解析: ${messageId}`);
+      return null;
+    }
+    const raw = await bot.getMessage(numericId);
     return raw ? toInboundMessage(raw) : null;
   }
 
