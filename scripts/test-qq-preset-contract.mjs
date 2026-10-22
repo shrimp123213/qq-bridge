@@ -43,14 +43,14 @@ test('snapshots are optional, partial snapshots require reading, and watermarks 
   assert.match(prefix, /partial=true[^。]*继续读取/);
   assert.match(prefix, /readThroughSeq 是桥接本地的 seq，不是 QQ messageId/);
   assert.match(prefix, /没有水位[^。]*省略 throughSeq/);
-  assert.match(prefix, /首次进入会话、角色变化[^。]*qq_get_prompt/);
+  assert.match(prefix, /首次进入会话、角色变化[^。]*chat_get_prompt/);
 });
 
 test('one closing action can acknowledge the read watermark after the full observation', () => {
-  assert.match(prefix, /qq_mark_read\(throughSeq=/);
-  assert.match(prefix, /qq_set_wake_config\(config=[^)]*throughSeq=/);
+  assert.match(prefix, /chat_mark_read\(throughSeq=/);
+  assert.match(prefix, /chat_set_wake_config\(config=[^)]*throughSeq=/);
   assert.match(prefix, /不需先 mark_read/);
-  assert.match(prefix, /qq_wait_for_messages\(timeoutMs=300000\)/);
+  assert.match(prefix, /chat_wait_for_messages\(timeoutMs=300000\)/);
   assert.match(prefix, /短等待不能代替/);
   assert.match(prefix, /preSleepWaitRemainingMs[^。]*继续等待/);
   assert.match(prefix, /若你参与回复[^。]*重新观察/);
@@ -58,12 +58,12 @@ test('one closing action can acknowledge the read watermark after the full obser
 
 test('pre-reply quiet checks, waiting for replies and pre-sleep observation have distinct instructions', () => {
   assert.match(prefix, /先理解并处理当前消息/);
-  assert.match(prefix, /【首答前】[^\n]*qq_wait_for_messages\(purpose="reply", quietMs=10000\)/);
+  assert.match(prefix, /【首答前】[^\n]*chat_wait_for_messages\(purpose="reply", quietMs=10000\)/);
   assert.match(prefix, /读取和思考花掉的时间也算，已安静足够就立即返回/);
   assert.match(prefix, /不要再重开一次普通长等待/);
   assert.match(prefix, /预算到但 quiet=false 不等于对方说完/);
   assert.match(prefix, /【等下文】[^\n]*purpose="messages", timeoutMs=60000~120000/);
-  assert.match(prefix, /【回复后】[^\n]*qq_wait_for_messages\(purpose="messages"\)/);
+  assert.match(prefix, /【回复后】[^\n]*chat_wait_for_messages\(purpose="messages"\)/);
   assert.match(prefix, /短静默不算沉睡前观察/);
   assert.match(prefix, /5 分钟观察不是回复的前置条件/);
   assert.match(prefix, /只有准备收尾时[^。]*preSleepWaitRemainingMs/);
@@ -73,11 +73,11 @@ test('social autonomy and visual, forwarding, sticker and web capabilities remai
   for (const text of [
     '【反 AI 味：拒绝有求必应】', '【保持主体性】', '【学习群友策略】',
     '【不要当群管家/主持人】', '普通对话默认 1 条，最多 2 条', '不要用空格断句',
-    '不会自动发送到 QQ', 'qq_get_message_images', 'qq_get_forward_msg', 'nestedForwardIds',
-    'qq_send_poke', 'qq_list_stickers', 'qq_get_sticker_image', 'qq_send_sticker',
-    'qq_collect_sticker', 'qq_sticker_note', 'qq_get_self_image',
-    'qq_set_sticker_remark', '只有管理端明确开启后才能用',
-    'qq_list_voices', 'qq_send_voice', 'verified=true 才代表这条语音确实落地',
+    '不会自动发送到 QQ', 'chat_get_message_images', 'chat_get_forward_msg', 'nestedForwardIds',
+    'chat_send_poke', 'chat_list_stickers', 'chat_get_sticker_image', 'chat_send_sticker',
+    'chat_collect_sticker', 'chat_sticker_note', 'chat_get_self_image',
+    'chat_set_sticker_remark', '只有管理端明确开启后才能用',
+    'chat_list_voices', 'chat_send_voice', 'verified=true 才代表这条语音确实落地',
     '语音**默认是关闭的**', '不要假装发了语音',
     'mcp__web-search-safe__web_search', 'mcp__web-search-safe__web_fetch',
   ]) assert.ok(prefix.includes(text), `missing capability or voice rule: ${text}`);
@@ -91,9 +91,9 @@ test('autonomy limits and the observation escape hatch stay described', () => {
     // [SILENT] 是桥接的退出标记，误用会静默吞掉回复。
     '不要用 [SILENT]',
     // 记忆面
-    '【记忆卫生】', 'qq_memory_append', 'qq_memory_query', 'qq_memory_remove', 'qq_memory_clear',
+    '【记忆卫生】', 'chat_memory_append', 'chat_memory_query', 'chat_memory_remove', 'chat_memory_clear',
     // 黑话面
-    'qq_slang_query', 'qq_slang_submit', '不重复提交',
+    'chat_slang_query', 'chat_slang_submit', '不重复提交',
     // 频率上限
     '普通闲聊约 3~5 轮一张', '别刷屏', '每条只能一张，不能附带文字', '不要频繁拍',
     // 会话令牌是硬前置，漏传会被拒绝。

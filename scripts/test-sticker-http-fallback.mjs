@@ -2,7 +2,7 @@
 //
 // 真实故障：`fetch_custom_face_detail` 原来只走 SnowLuma 的 WS action。WS 重连窗口里
 // 同步必然失败 —— 日志实测 33 次同步 16 次失败（≈48%，全是 WS closed），
-// 表现就是"收藏表情时有时无"，以及 qq_get_sticker_image 报「找不到表情」。
+// 表现就是"收藏表情时有时无"，以及 chat_get_sticker_image 报「找不到表情」。
 // 而同一个网关的 HTTP 口一直可用（onebotSend / fetch_ptt_text 都在用）。
 //
 // 本文件验证：WS 正常时走 WS（不多打一次 HTTP）；WS 失败时自动改走 HTTP，且结果标 via=http。

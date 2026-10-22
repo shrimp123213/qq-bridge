@@ -134,10 +134,10 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null, fix
   return callTool;
 }
 
-// 回归（issue #24）：`qq_wait_for_messages` 以前走全局 fetch（undici 自带 300s headersTimeout），
+// 回归（issue #24）：`chat_wait_for_messages` 以前走全局 fetch（undici 自带 300s headersTimeout），
 // 而沉睡前观察的预算就是 300s —— 第 301 秒必然 `fetch failed`，桥接侧却还在跑满预算占着
 // activeWaits，AI 只能重试烧 token。现在必须走 node:http 长轮询（没有默认响应超时）。
-test('qq_wait_for_messages uses the node:http long-poll channel, not fetch', async () => {
+test('chat_wait_for_messages uses the node:http long-poll channel, not fetch', async () => {
   const { EventEmitter } = await import('node:events');
   const { PassThrough } = await import('node:stream');
   let requested = null;
@@ -164,7 +164,7 @@ test('qq_wait_for_messages uses the node:http long-poll channel, not fetch', asy
     null,
     fakeHttp
   );
-  const result = await callTool('qq_wait_for_messages', { key: 'group:1', token: 'fixture-token', timeoutMs: 300000, quietMs: 10000 });
+  const result = await callTool('chat_wait_for_messages', { key: 'group:1', token: 'fixture-token', timeoutMs: 300000, quietMs: 10000 });
   assert.notEqual(result.isError, true, result.content?.[0]?.text);
   assert.ok(requested, '必须真的发起 http.request');
   assert.equal(requested.path, '/api/socialV2/wait');
@@ -176,14 +176,14 @@ test('qq_wait_for_messages uses the node:http long-poll channel, not fetch', asy
 });
 
 // 回归：桥接个别分支会把 error 回成**对象**。直接 `new Error(obj)` 会变成
-// "[object Object]"（r3 的已知未修项里就有一条线上记录：qq_wait_for_messages 报
+// "[object Object]"（r3 的已知未修项里就有一条线上记录：chat_wait_for_messages 报
 // `error: "\"Error: [object Object]\""`）。必须序列化成可读文本。
 test('object-shaped bridge errors are rendered readably, not as [object Object]', async () => {
   const callTool = loadSnowlumaTools(async () => Response.json(
     { ok: false, error: { code: 'send/rejected', message: '消息含敏感信息，已阻止发送' } },
     { status: 200 },
   ));
-  const result = await callTool('qq_send_group_message', { groupId: '456', message: 'fixture' });
+  const result = await callTool('chat_send_group_message', { groupId: '456', message: 'fixture' });
   assert.equal(result.isError, true);
   const text = String(result.content[0].text);
   assert.ok(!/\[object Object\]/.test(text), `错误文本不得是不可读的对象：${text}`);
@@ -198,7 +198,7 @@ test('a bridge 200 with ok:false is reported to the model as a failure', async (
     { ok: false, error: '消息含敏感信息，已阻止发送' },
     { status: 200 },
   ));
-  const result = await callTool('qq_send_group_message', { groupId: '456', message: 'fixture' });
+  const result = await callTool('chat_send_group_message', { groupId: '456', message: 'fixture' });
   assert.equal(result.isError, true, 'ok:false 必须作为工具错误返回');
   assert.match(result.content[0].text, /阻止发送/);
 });
@@ -214,7 +214,7 @@ test('legacy read tools fail closed unless the bridge reports closed-agent', asy
     {},                       // 无 mode 字段（桥接对 agent 流量返回的最小状态）
   ]) {
     const callTool = loadSnowlumaTools(async () => Response.json(status), null, null, 'closed-agent');
-    const result = await callTool('qq_list_groups', {});
+    const result = await callTool('chat_list_groups', {});
     assert.equal(result.isError, true, `mode=${status.mode ?? '(缺失)'} 时旧只读工具必须拒绝`);
   }
   // 只有确认是 closed-agent 才放行
@@ -222,7 +222,7 @@ test('legacy read tools fail closed unless the bridge reports closed-agent', asy
     if (String(url).includes('/api/status')) return Response.json({ mode: 'closed-agent' });
     return Response.json({ status: 'ok', retcode: 0, data: [{ group_id: 456, group_name: 'fixture' }] });
   }, null, null, 'closed-agent');
-  const result = await callTool('qq_list_groups', {});
+  const result = await callTool('chat_list_groups', {});
   assert.notEqual(result.isError, true, 'closed-agent 下应放行');
 });
 
@@ -232,14 +232,14 @@ test('legacy read tools fail closed unless the bridge reports closed-agent', asy
 test('legacy read tools are not registered at all outside closed-agent', async () => {
   for (const mode of ['reserved2', 'chat', 'reserved']) {
     const callTool = loadSnowlumaTools(async () => Response.json({ mode }), null, null, mode);
-    assert.equal(callTool.has('qq_list_groups'), false, `${mode} 下不该注册 qq_list_groups`);
-    assert.equal(callTool.has('qq_get_group_history'), false, `${mode} 下不该注册 qq_get_group_history`);
+    assert.equal(callTool.has('chat_list_groups'), false, `${mode} 下不该注册 chat_list_groups`);
+    assert.equal(callTool.has('chat_get_group_history'), false, `${mode} 下不该注册 chat_get_group_history`);
     // 带令牌的 v2 读工具在任何模式下都该在
-    assert.equal(callTool.has('qq_get_group_members'), true, `${mode} 下 v2 群成员工具必须可用`);
-    assert.equal(callTool.has('qq_get_active_members'), true);
+    assert.equal(callTool.has('chat_get_group_members'), true, `${mode} 下 v2 群成员工具必须可用`);
+    assert.equal(callTool.has('chat_get_active_members'), true);
   }
   const closed = loadSnowlumaTools(async () => Response.json({ mode: 'closed-agent' }), null, null, 'closed-agent');
-  assert.equal(closed.has('qq_list_groups'), true, 'closed-agent 下旧只读工具必须存在');
+  assert.equal(closed.has('chat_list_groups'), true, 'closed-agent 下旧只读工具必须存在');
 });
 
 // 拒绝时绝不能把 config.json 的群白名单回吐给模型。
@@ -258,17 +258,17 @@ test('denied group reads never reveal the group allowlist', async () => {
       assert.fail('denied group read must not call OneBot');
     }, fixtureConfig, null, mode);
 
-    const v2 = await callTool('qq_get_group_members', { key: 'group:999999', token: 'fixture-agent-token' });
+    const v2 = await callTool('chat_get_group_members', { key: 'group:999999', token: 'fixture-agent-token' });
     assert.equal(v2.isError, true, `v2 群成员工具在 ${mode} 下必须失败`);
     assert.doesNotMatch(v2.content[0].text, /111111|222222/);
 
     if (mode === 'closed-agent') {
-      const legacy = await callTool('qq_get_group_history', { groupId: '999999' });
+      const legacy = await callTool('chat_get_group_history', { groupId: '999999' });
       assert.equal(legacy.isError, true, 'closed-agent 下非白名单群必须拒绝');
       assert.doesNotMatch(legacy.content[0].text, /111111|222222/);
     } else {
       // reserved2 下旧只读工具根本没注册：连"被拒绝"的机会都不给
-      assert.equal(callTool.has('qq_get_group_history'), false);
+      assert.equal(callTool.has('chat_get_group_history'), false);
     }
     assert.ok(calls.length >= 1, '应当只经过桥接的鉴权/拒绝路径');
   }

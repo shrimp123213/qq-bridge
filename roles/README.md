@@ -34,7 +34,7 @@
 - 想分多条就用空格分隔；想沉默就只输出 [SILENT]。
 
 ## 三、分条方式 〔二代〕
-- 用 qq_send_message 的 messages 数组分条；潜水用 qq_mark_read。
+- 用 chat_send_message 的 messages 数组分条；潜水用 chat_mark_read。
 
 ## 四、说话风格
 - 这条没有标记 → 两种模式都会注入。

@@ -1,4 +1,4 @@
-// qq_wait_for_messages 的「漏消息窗口」回归（2026-10-18 修）。
+// chat_wait_for_messages 的「漏消息窗口」回归（2026-10-18 修）。
 //
 // 真实故障：模型在思考/发消息那几秒里到达的消息，会落进等待窗口的缝里 ——
 //   旧实现按 `seq > 请求开始时的 lastUnreadSeq` 取 newMessages，于是这些消息
@@ -19,7 +19,7 @@ let tests = 0;
 async function withBridge(run, config = {}) {
   const h = await bridgeHarness({ config: { socialV2: {
     wait: { minMs: 100, maxMs: 2000, minQuietAfterNewMs: 0 },
-    // 沉睡前观察是另一条闸门（qq_mark_read 会因此 400）；这里要测的是水位，先关掉。
+    // 沉睡前观察是另一条闸门（chat_mark_read 会因此 400）；这里要测的是水位，先关掉。
     wake: { preSleepWaitEnabled: false },
     proactive: { enabled: false },
     sticker: { enabled: false },
@@ -168,7 +168,7 @@ await test('短等待不算沉睡前观察：canSleepNow=false 且 hint 给出�
     assert.equal(result.status, 200);
     assert.equal(result.data.canSleepNow, false, '刚发过消息不可能立刻放行');
     assert.equal(result.data.countsAsObservation, false, 'timeoutMs < 观察窗口 ⇒ 不算观察');
-    assert.match(result.data.hint, /qq_wait_for_messages\(timeoutMs=180000\)/, '必须给出该发的准确参数');
+    assert.match(result.data.hint, /chat_wait_for_messages\(timeoutMs=180000\)/, '必须给出该发的准确参数');
     assert.match(result.data.hint, /不达标/, '要点明本次不达标');
     assert.match(result.data.hint, /还需约 \d+ 秒/, '要给出还差多少秒');
   }, { wake: { preSleepWaitEnabled: true, preSleepWaitMs: 180000 } });

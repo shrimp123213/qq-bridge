@@ -2,12 +2,12 @@
 //
 // 背景（会话实证，docs/audits/AUDIT_2026-10-18_MEDIA_AND_WATERMARK.md §3 P3）：
 //   一份 reserved2 会话的请求头是「58 个工具 / 45.5 KB schema（≈14k token/次）」，其中
-//     · qq_list_groups / qq_get_group_members / qq_get_group_history：旧无令牌工具，
+//     · chat_list_groups / chat_get_group_members / chat_get_group_history：旧无令牌工具，
 //       在 reserved2 下**必然** 403，白占 schema 还诱导模型误调（实测 turn10 踩过）；
-//     · 而 qq-chat-v2 预设第 6 条又明确叫模型去用 qq_get_group_members 拿 QQ 号。
+//     · 而 qq-chat-v2 预设第 6 条又明确叫模型去用 chat_get_group_members 拿 QQ 号。
 //
 // 本文件验证：
-//   1. qq_get_group_members 已是 v2 形态（key + token），走桥接的 /api/socialV2/group-members；
+//   1. chat_get_group_members 已是 v2 形态（key + token），走桥接的 /api/socialV2/group-members；
 //   2. 该端点只认 group: 会话、要令牌、不在白名单就拒（与其它 v2 读工具同一套闸门）；
 //   3. 旧只读工具按**启动模式**注册（源代码级断言：DSH 侧注册需要真跑 MCP 子进程，
 //      本机沙箱里 spawn EPERM，因此这里退化为结构断言 + 下面的令牌级行为断言）；
@@ -141,7 +141,7 @@ await test('工具开关能关掉 group-members（getGroupMembers=false）', asy
   await withBridge(async ({ request }) => {
     const out = await request('group-members');
     assert.equal(out.status, 403);
-    assert.match(out.data.error, /qq_get_group_members/);
+    assert.match(out.data.error, /chat_get_group_members/);
   }, { tools: { getGroupMembers: false } });
 });
 
@@ -175,8 +175,8 @@ await test('旧只读工具按启动模式注册，v2 群成员工具不依赖 c
   assert.match(src, /registerLegacyReadTools/, '必须有按模式决定的注册开关');
   assert.match(src, /mode === '' \|\| bootBridgeMode === 'closed-agent'|bootBridgeMode === '' \|\| bootBridgeMode === 'closed-agent'/,
     '只在 closed-agent（或探测失败）时注册旧只读工具');
-  // qq_list_groups / qq_get_group_history 必须包在开关里
-  for (const name of ['qq_list_groups', 'qq_get_group_history']) {
+  // chat_list_groups / chat_get_group_history 必须包在开关里
+  for (const name of ['chat_list_groups', 'chat_get_group_history']) {
     const at = src.indexOf(`'${name}'`);
     assert.ok(at > 0, `${name} 应当仍存在（closed-agent 下要能用）`);
     const guarded = src.lastIndexOf('if (registerLegacyReadTools) {', at);
@@ -184,17 +184,17 @@ await test('旧只读工具按启动模式注册，v2 群成员工具不依赖 c
     const between = src.slice(guarded, at);
     assert.ok(!between.includes('}\n\n//'), `${name} 与开关之间不能夹着别的注册块`);
   }
-  // qq_get_group_members 必须是 v2 形态（带 key+token），且不在开关里
-  const membersAt = src.indexOf("'qq_get_group_members'");
+  // chat_get_group_members 必须是 v2 形态（带 key+token），且不在开关里
+  const membersAt = src.indexOf("'chat_get_group_members'");
   assert.ok(membersAt > 0);
   const membersBlock = src.slice(membersAt, membersAt + 900);
   assert.match(membersBlock, /key: z\.string\(\)/, 'v2 形态必须有 key');
   assert.match(membersBlock, /token: z\.string\(\)/, 'v2 形态必须有 token');
   assert.doesNotMatch(membersBlock, /groupId: z\./, '不应再接受裸 groupId');
-  assert.ok(src.lastIndexOf('if (registerLegacyReadTools) {', membersAt) < src.indexOf("'qq_list_groups'"),
-    'qq_get_group_members 不能落在旧只读工具的注册开关里');
+  assert.ok(src.lastIndexOf('if (registerLegacyReadTools) {', membersAt) < src.indexOf("'chat_list_groups'"),
+    'chat_get_group_members 不能落在旧只读工具的注册开关里');
   // 工具开关登记（否则控制台关不掉它）
-  assert.match(src, /qq_get_group_members: 'getGroupMembers'/, '工具开关要登记 getGroupMembers');
+  assert.match(src, /chat_get_group_members: 'getGroupMembers'/, '工具开关要登记 getGroupMembers');
 });
 
 console.log(`\n${failures ? 'FAILED' : 'ALL PASS'}  tests=${tests} failures=${failures}`);

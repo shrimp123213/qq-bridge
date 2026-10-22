@@ -108,7 +108,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     }
     async fetchFaceEntity(id) { calls.faces.push(id); return null; }
     async request(action, params = {}) {
-      // 群成员列表：v2 读工具 qq_get_group_members 会用到（含 WS 不可用时的 HTTP 兜底路径）。
+      // 群成员列表：v2 读工具 chat_get_group_members 会用到（含 WS 不可用时的 HTTP 兜底路径）。
       if (action === 'get_group_member_list') {
         return {
           status: 'ok', retcode: 0,

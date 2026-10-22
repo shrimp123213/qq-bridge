@@ -163,43 +163,43 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     client = new Client({ name: 'qq-model-view-test', version: '1.0.0' });
     await client.connect(transport);
     const listed = await client.listTools();
-    for (const name of ['qq_mark_read', 'qq_set_wake_config']) {
+    for (const name of ['chat_mark_read', 'chat_set_wake_config']) {
       const schema = listed.tools.find((tool) => tool.name === name).inputSchema;
       assert.equal(schema.properties.throughSeq.type, 'integer');
       assert.equal(schema.properties.throughSeq.minimum, 0);
       assert.equal(schema.properties.throughSeq.maximum, Number.MAX_SAFE_INTEGER);
       assert.equal(schema.required.includes('throughSeq'), false);
     }
-    const waitSchema = listed.tools.find((tool) => tool.name === 'qq_wait_for_messages').inputSchema;
+    const waitSchema = listed.tools.find((tool) => tool.name === 'chat_wait_for_messages').inputSchema;
     assert.deepEqual(waitSchema.properties.purpose.enum, ['messages', 'reply']);
     assert.equal(waitSchema.required.includes('purpose'), false);
     const common = { key: 'group:123', token: 'fixture-token' };
-    const read = await client.callTool({ name: 'qq_get_unread_messages', arguments: common });
+    const read = await client.callTool({ name: 'chat_get_unread_messages', arguments: common });
     const readText = read.content.find((part) => part.type === 'text').text;
     const data = JSON.parse(readText);
     assert.equal(data.readThroughSeq, 21);
     assert.equal('plain' in data.messages[0], false);
     assert.equal(readText, JSON.stringify(data));
 
-    await client.callTool({ name: 'qq_get_unread_messages', arguments: { ...common, afterSeq: 0, limit: 100 } });
+    await client.callTool({ name: 'chat_get_unread_messages', arguments: { ...common, afterSeq: 0, limit: 100 } });
     assert.equal(new URL(requests.at(-1).url, 'http://fixture').searchParams.get('afterSeq'), '0');
-    await client.callTool({ name: 'qq_get_unread_messages', arguments: { ...common, afterSeq: 21 } });
+    await client.callTool({ name: 'chat_get_unread_messages', arguments: { ...common, afterSeq: 21 } });
     assert.equal(new URL(requests.at(-1).url, 'http://fixture').searchParams.get('afterSeq'), '21');
     for (const afterSeq of [-1, 1.5, '21', Number.MAX_SAFE_INTEGER + 1]) {
       const before = requests.length;
-      const invalid = await client.callTool({ name: 'qq_get_unread_messages', arguments: { ...common, afterSeq } });
+      const invalid = await client.callTool({ name: 'chat_get_unread_messages', arguments: { ...common, afterSeq } });
       assert.equal(invalid.isError, true);
       assert.equal(requests.length, before);
     }
 
     // Omission preserves the old wait contract, while reply explicitly selects
     // the short pre-reply quiet window. Both travel through the real MCP schema.
-    await client.callTool({ name: 'qq_wait_for_messages', arguments: common });
+    await client.callTool({ name: 'chat_wait_for_messages', arguments: common });
     assert.equal(requests.at(-1).url, '/api/socialV2/wait');
     assert.deepEqual(requests.at(-1).body, { key: common.key });
     assert.equal(requests.at(-1).token, common.token);
     for (const purpose of ['messages', 'reply']) {
-      await client.callTool({ name: 'qq_wait_for_messages', arguments: {
+      await client.callTool({ name: 'chat_wait_for_messages', arguments: {
         ...common, purpose, timeoutMs: 30000, quietMs: 10000, minNewMessages: 1
       } });
       assert.deepEqual(requests.at(-1).body, {
@@ -208,26 +208,26 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     }
     for (const purpose of ['sleep', '', 1, null]) {
       const before = requests.length;
-      const invalid = await client.callTool({ name: 'qq_wait_for_messages', arguments: { ...common, purpose } });
+      const invalid = await client.callTool({ name: 'chat_wait_for_messages', arguments: { ...common, purpose } });
       assert.equal(invalid.isError, true);
       assert.equal(requests.length, before, `invalid wait purpose ${purpose} must not reach the API`);
     }
 
-    await client.callTool({ name: 'qq_mark_read', arguments: { ...common, throughSeq: 21 } });
+    await client.callTool({ name: 'chat_mark_read', arguments: { ...common, throughSeq: 21 } });
     assert.equal(requests.at(-1).url, '/api/socialV2/mark-read');
     assert.deepEqual(requests.at(-1).body, { key: common.key, throughSeq: 21 });
     assert.equal(requests.at(-1).token, common.token);
 
-    await client.callTool({ name: 'qq_set_wake_config', arguments: { ...common, config: { mode: 'diving' }, throughSeq: 0 } });
+    await client.callTool({ name: 'chat_set_wake_config', arguments: { ...common, config: { mode: 'diving' }, throughSeq: 0 } });
     assert.equal(requests.at(-1).url, '/api/socialV2/wake-config');
     assert.deepEqual(requests.at(-1).body, { key: common.key, config: { mode: 'diving' }, throughSeq: 0 });
-    await client.callTool({ name: 'qq_set_wake_config', arguments: { ...common, config: { mode: 'active' } } });
+    await client.callTool({ name: 'chat_set_wake_config', arguments: { ...common, config: { mode: 'active' } } });
     assert.deepEqual(requests.at(-1).body, { key: common.key, config: { mode: 'active' } });
 
     for (const value of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '21']) {
       const before = requests.length;
-      for (const name of ['qq_mark_read', 'qq_set_wake_config']) {
-        const invalid = await client.callTool({ name, arguments: { ...common, throughSeq: value, ...(name === 'qq_set_wake_config' ? { config: {} } : {}) } });
+      for (const name of ['chat_mark_read', 'chat_set_wake_config']) {
+        const invalid = await client.callTool({ name, arguments: { ...common, throughSeq: value, ...(name === 'chat_set_wake_config' ? { config: {} } : {}) } });
         assert.equal(invalid.isError, true);
       }
       assert.equal(requests.length, before, `invalid throughSeq ${value} must not reach the API`);

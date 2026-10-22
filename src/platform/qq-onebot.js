@@ -167,7 +167,7 @@ export function createQQPlatform({ cfg, log, configPath }) {
   // 为什么要有：`fetch_custom_face_detail` 原来只走 SnowLuma 的 WS action，于是
   // 「WS 正在重连」这段时间里表情库同步必然失败。日志实测 33 次同步里 16 次失败（≈48%），
   // 全是 `SnowLuma WebSocket closed before opening`；表现就是操作者说的
-  // 「有时读群友的表情包会失败」——库里没有新收藏 ⇒ qq_get_sticker_image 直接报「找不到表情」。
+  // 「有时读群友的表情包会失败」——库里没有新收藏 ⇒ chat_get_sticker_image 直接报「找不到表情」。
   //
   // 而**同一个网关的 HTTP 口一直是可用的**（sendMessage 发消息、voiceToText 转写都直接用它）。
   // 读接口没有理由单点依赖 WS。这里只在 WS 失败时兜底，不改变正常路径的延迟。

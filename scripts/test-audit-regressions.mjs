@@ -398,7 +398,7 @@ await test('R15 /api/send/* 失败路径不抛作用域错误，并回滚发送�
 });
 
 // ── R16. reserved2 存储层不得丢表情识别字段 ─────────────────────────────────
-// appendSocialV2Message 是 v2 唯一的消息落库入口；qq_get_message_images 又从这里的
+// appendSocialV2Message 是 v2 唯一的消息落库入口；chat_get_message_images 又从这里的
 // media 取字段（findMessageMedia → fetchOneBotImage）。它只留 kind/file/url/faceId、
 // 并把 kind 拍平成 image ⇒ emojiId/subType 丢失后 isSticker 判定为假：
 // 市场/收藏表情先走必然失败的 get_image，emoji_id→CDN 的兜底整条失效；

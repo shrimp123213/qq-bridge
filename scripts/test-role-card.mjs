@@ -15,7 +15,7 @@ const CARD = [
   '- 想分条就用空格分隔；想沉默就输出 [SILENT]。',
   '',
   '## 三、发言方式 〔二代〕',
-  '- 用 qq_send_message 的数组分条，潜水走 qq_mark_read。',
+  '- 用 chat_send_message 的数组分条，潜水走 chat_mark_read。',
   '',
   '## 四、说话风格',
   '- 简短、口语化。',
@@ -40,8 +40,8 @@ test('按模式筛选：只保留公共小节 + 该模式专属小节', () => {
   }
   // 专属内容互不串场
   assert.match(v1, /空格分隔/);
-  assert.doesNotMatch(v1, /qq_send_message/);
-  assert.match(v2, /qq_send_message/);
+  assert.doesNotMatch(v1, /chat_send_message/);
+  assert.match(v2, /chat_send_message/);
   assert.doesNotMatch(v2, /\[SILENT\]/);
 });
 

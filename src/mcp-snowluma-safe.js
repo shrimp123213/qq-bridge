@@ -134,7 +134,7 @@ function readConsoleToken() {
  *
  * 为什么必须有：桥接个别分支会回一个**对象**（例如 `{code, message}`），直接
  * `new Error(obj)` 会把它 String 成 "[object Object]" —— 模型和运维都读不到任何信息。
- * r3 的已知未修项里就记着 `qq_wait_for_messages` 出现过 `error: "\"Error: [object Object]\""`。
+ * r3 的已知未修项里就记着 `chat_wait_for_messages` 出现过 `error: "\"Error: [object Object]\""`。
  */
 function errorText(value, fallback) {
   if (typeof value === 'string' && value.trim()) return value.trim();
@@ -194,7 +194,7 @@ function agentHeaders(extra = {}) {
  * 长轮询专用 POST（`node:http`，不经过 undici）。
  *
  * 为什么必须单独一条：Node 的全局 `fetch` 是 undici，自带 300 秒 `headersTimeout`。
- * 而 `qq_wait_for_messages` 的常规用法就是 `timeoutMs=300000` 的沉睡前观察 ——
+ * 而 `chat_wait_for_messages` 的常规用法就是 `timeoutMs=300000` 的沉睡前观察 ——
  * 客户端会在第 301 秒以 `fetch failed / Headers Timeout Error` 断掉，桥接侧的
  * 长轮询却还在跑满自己的预算：AI 拿不到结果只能重试，而 `activeWaits` 仍占着会话
  * （重新等待被 429），于是空转烧 token（见 issue #24）。`node:http` 没有默认响应超时，
@@ -281,7 +281,7 @@ async function authorizeRead(key) {
   throw new Error('旧只读工具没有会话令牌；请使用带会话令牌的 v2 读工具');
 }
 
-// 旧只读工具（qq_status 之外的 qq_list_groups / qq_get_group_members / qq_get_group_history）
+// 旧只读工具（chat_status 之外的 chat_list_groups / chat_get_group_members / chat_get_group_history）
 // 没有会话令牌，因此**只能在封闭 agent（管理员私聊）里使用**。
 //
 // 这里用「确认是 closed-agent 才放行」的白名单写法，而不是「看到 reserved2 就拒绝」的黑名单写法：
@@ -304,47 +304,47 @@ const server = new McpServer({ name: 'snowluma-safe', version: '0.2.1-r1' });
 // 这里用一个注册过滤器统一处理：开关关闭 ⇒ 该工具根本不注册 ⇒ 既省 token 又不给模型误调的机会。
 // DSH 在启动时读取工具清单，所以关掉/打开后需要重启 DSH 才会刷新（控制台面板已注明）。
 //
-// 只列**各模式共用的工具不在其中**：qq_send_group_message / qq_send_private_message / qq_reply
+// 只列**各模式共用的工具不在其中**：chat_send_group_message / chat_send_private_message / chat_reply
 // 同时服务 chat / reserved / closed-agent 模式，用 v2 的开关去决定它们是否注册会误伤其它模式，
 // 所以这三个仍然只在调用时由桥接校验。
 const TOOL_CONFIG_FLAGS = {
-  qq_get_prompt: 'getPrompt',
-  qq_get_unread_messages: 'getUnread',
-  qq_get_recent_messages: 'getRecent',
-  qq_social_state: 'socialState',
-  qq_mark_read: 'markRead',
-  qq_set_wake_config: 'setWakeConfig',
-  qq_send_burst: 'sendBurst',
-  qq_send_message: 'sendMessage',
-  qq_wait_for_messages: 'waitMessages',
-  qq_report_feedback: 'feedback',
-  qq_get_my_recent_messages: 'getMyRecent',
-  qq_get_message_detail: 'getMessageDetail',
-  qq_get_active_members: 'getActiveMembers',
-  qq_get_group_members: 'getGroupMembers',
-  qq_memory_append: 'memory',
-  qq_memory_query: 'memory',
-  qq_memory_remove: 'memory',
-  qq_memory_clear: 'memory',
-  qq_slang_query: 'slangQuery',
-  qq_slang_submit: 'slangSubmit',
-  qq_send_voice: 'sendVoice',
-  qq_list_voices: 'sendVoice',
+  chat_get_prompt: 'getPrompt',
+  chat_get_unread_messages: 'getUnread',
+  chat_get_recent_messages: 'getRecent',
+  chat_social_state: 'socialState',
+  chat_mark_read: 'markRead',
+  chat_set_wake_config: 'setWakeConfig',
+  chat_send_burst: 'sendBurst',
+  chat_send_message: 'sendMessage',
+  chat_wait_for_messages: 'waitMessages',
+  chat_report_feedback: 'feedback',
+  chat_get_my_recent_messages: 'getMyRecent',
+  chat_get_message_detail: 'getMessageDetail',
+  chat_get_active_members: 'getActiveMembers',
+  chat_get_group_members: 'getGroupMembers',
+  chat_memory_append: 'memory',
+  chat_memory_query: 'memory',
+  chat_memory_remove: 'memory',
+  chat_memory_clear: 'memory',
+  chat_slang_query: 'slangQuery',
+  chat_slang_submit: 'slangSubmit',
+  chat_send_voice: 'sendVoice',
+  chat_list_voices: 'sendVoice',
   // 下面这些曾经漏登记。漏一个不是"多注册一个工具"那么轻：桥接那边按 `v2ToolEnabled(flag)`
   // 在**调用期**一律 403，而这里不登记就等于"控制台显示已关闭、模型每次请求仍收到它的完整
   // 描述与参数 schema，然后调用它、再拿到 403"——既白烧 token（本文件开头 176 行起就是为省这份
-  // token 才改注册期过滤的），又诱导模型误调。`qq_set_sticker_remark` 默认就是 `false`
+  // token 才改注册期过滤的），又诱导模型误调。`chat_set_sticker_remark` 默认就是 `false`
   // （见 bridge.js 的 socialV2.tools 默认表），所以此前它一直是"默认关闭却仍然可见"。
-  qq_send_poke: 'sendPoke',
-  qq_get_message_images: 'getImages',
-  qq_get_forward_msg: 'getForwardMsg',
-  qq_list_stickers: 'listStickers',
-  qq_get_sticker_image: 'getStickerImage',
-  qq_send_sticker: 'sendSticker',
-  qq_collect_sticker: 'collectSticker',
-  qq_get_self_image: 'getSelfImage',
-  qq_sticker_note: 'stickerNote',
-  qq_set_sticker_remark: 'setStickerRemark',
+  chat_send_poke: 'sendPoke',
+  chat_get_message_images: 'getImages',
+  chat_get_forward_msg: 'getForwardMsg',
+  chat_list_stickers: 'listStickers',
+  chat_get_sticker_image: 'getStickerImage',
+  chat_send_sticker: 'sendSticker',
+  chat_collect_sticker: 'collectSticker',
+  chat_get_self_image: 'getSelfImage',
+  chat_sticker_note: 'stickerNote',
+  chat_set_sticker_remark: 'setStickerRemark',
 };
 const disabledTools = [];
 {
@@ -360,7 +360,7 @@ const disabledTools = [];
 }
 
 server.tool(
-  'qq_status',
+  'chat_status',
   '查询 QQ 机器人登录状态与账号信息（只读）。',
   {},
   async () => {
@@ -381,7 +381,7 @@ server.tool(
 //   每个工具的描述 + 参数 schema 都随 system prompt 在**每一次**请求里重发。
 //   实测一份 reserved2 会话的请求头是「58 个工具 / 45.5 KB schema（≈14k token/次）」，
 //   其中 3 个旧只读工具在 reserved2 下**必然**返回 403，却照样占着 2500+ 字节；
-//   更要命的是它们会诱导模型误调（实测 turn10 有一次 qq_get_group_members → 403，白烧一步）。
+//   更要命的是它们会诱导模型误调（实测 turn10 有一次 chat_get_group_members → 403，白烧一步）。
 //   本文件开头（TOOL_CONFIG_FLAGS 那段）已经为「关掉的工具」立过同样的规矩，这里补齐模式维度。
 //
 // 语义：旧只读工具没有会话令牌，`legacyReadToolAllowed()` 只放行 closed-agent。
@@ -402,12 +402,12 @@ const bootBridgeMode = (() => {
 })();
 const registerLegacyReadTools = bootBridgeMode === '' || bootBridgeMode === 'closed-agent';
 if (!registerLegacyReadTools) {
-  console.error(`[snowluma-safe] 当前桥接模式 ${bootBridgeMode}：不注册旧只读工具（qq_list_groups / qq_get_group_history），改用带令牌的 v2 读工具`);
+  console.error(`[snowluma-safe] 当前桥接模式 ${bootBridgeMode}：不注册旧只读工具（chat_list_groups / chat_get_group_history），改用带令牌的 v2 读工具`);
 }
 
 if (registerLegacyReadTools) {
 server.tool(
-  'qq_list_groups',
+  'chat_list_groups',
   '列出机器人所在的全部 QQ 群（只读）：群号、群名。',
   {},
   async () => {
@@ -440,7 +440,7 @@ server.tool(
 // （见 dsh/agent-presets/qq-chat-v2/agent.cordis.yml 第 6 条），但旧版在 reserved2 下必然 403
 // —— 预设教模型用一个永远失败的工具，等于每次都白烧一步。改成 v2 后同一个名字在两种模式下都成立。
 server.tool(
-  'qq_get_group_members',
+  'chat_get_group_members',
   '列出指定群的成员（只读）：QQ 号、昵称、群名片。等特定的人、要 @ 某个人、或需要确认谁在群里时用；QQ 号取返回里的 userId。只返回白名单群，且只读取桥接允许的会话。',
   {
     key: z.string().describe('会话 key，格式 group:群号'),
@@ -463,7 +463,7 @@ server.tool(
 
 if (registerLegacyReadTools) {
 server.tool(
-  'qq_get_group_history',
+  'chat_get_group_history',
   '获取指定群的最近消息历史（只读）。messageSeq 可选：从该消息序号往前取。注意：是否可用取决于 SnowLuma 是否实现 get_group_msg_history。',
   { groupId: z.union([z.number(), z.string()]).describe('群号'), messageSeq: z.number().optional().describe('起始消息序号（可选）') },
   async ({ groupId, messageSeq }) => {
@@ -492,8 +492,8 @@ server.tool(
 }
 
 server.tool(
-  'qq_send_group_message',
-  '向指定 QQ 群发送一条纯文本消息；如需引用某条消息，可传 replyToMessageId（非零整数，可为负数），可先用 qq_get_recent_messages / qq_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 qq_send_message；reserved2 下调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。',
+  'chat_send_group_message',
+  '向指定 QQ 群发送一条纯文本消息；如需引用某条消息，可传 replyToMessageId（非零整数，可为负数），可先用 chat_get_recent_messages / chat_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 chat_send_message；reserved2 下调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。',
   {
     groupId: z.union([z.number(), z.string()]).describe('群号（必须在白名单内）'),
     message: z.string().describe('消息文本，纯文本，不要用 Markdown 或 CQ 码'),
@@ -518,8 +518,8 @@ server.tool(
 );
 
 server.tool(
-  'qq_reply',
-  '在指定 QQ 群里引用/回复某条消息，并发送一条文本。适合群消息很多、需要明确“我回的是哪条”时使用；replyToMessageId 是被引用消息的 id（非零整数，QQ 消息 id 可能为负数），可先用 qq_get_recent_messages / qq_get_unread_messages / qq_get_message_detail 查到具体消息内容和 id。发送前桥接会校验该 id 存在且属于当前会话。二代模式下这是你正常可用的引用工具，但不要每条都引用。只有以下情况才需要引用：① 你这条消息指向的人或消息并非最新一条别人的消息（也就是你在回更早的某条）；② 你连续几句话里不同消息指代的是不同的消息或不同的人。其他情况（上下文唯一、刚在接同一条最新消息）不要引用，别让对方猜，也别为了用工具而用。reserved2 下调用时必须携带会话令牌 token。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。',
+  'chat_reply',
+  '在指定 QQ 群里引用/回复某条消息，并发送一条文本。适合群消息很多、需要明确“我回的是哪条”时使用；replyToMessageId 是被引用消息的 id（非零整数，QQ 消息 id 可能为负数），可先用 chat_get_recent_messages / chat_get_unread_messages / chat_get_message_detail 查到具体消息内容和 id。发送前桥接会校验该 id 存在且属于当前会话。二代模式下这是你正常可用的引用工具，但不要每条都引用。只有以下情况才需要引用：① 你这条消息指向的人或消息并非最新一条别人的消息（也就是你在回更早的某条）；② 你连续几句话里不同消息指代的是不同的消息或不同的人。其他情况（上下文唯一、刚在接同一条最新消息）不要引用，别让对方猜，也别为了用工具而用。reserved2 下调用时必须携带会话令牌 token。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。',
   {
     groupId: z.union([z.number(), z.string()]).describe('群号（必须在白名单内）'),
     replyToMessageId: z.union([z.number(), z.string()]).describe('被引用/回复的消息 id（非零整数，可为负数）'),
@@ -542,8 +542,8 @@ server.tool(
 );
 
 server.tool(
-  'qq_send_private_message',
-  '向指定 QQ 好友发送一条私聊消息。若提供 replyToMessageId，会以 QQ 引用/回复形式发出（引用条 + 文本）。replyToMessageId 必须是非零整数消息 id（QQ 消息 id 可能为负数），可先用 qq_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 qq_send_message；调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标 QQ 必须命中系统白名单（config.json 的 allow.private），否则拒绝。',
+  'chat_send_private_message',
+  '向指定 QQ 好友发送一条私聊消息。若提供 replyToMessageId，会以 QQ 引用/回复形式发出（引用条 + 文本）。replyToMessageId 必须是非零整数消息 id（QQ 消息 id 可能为负数），可先用 chat_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 chat_send_message；调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标 QQ 必须命中系统白名单（config.json 的 allow.private），否则拒绝。',
   {
     userId: z.union([z.number(), z.string()]).describe('好友 QQ 号（必须在白名单内）'),
     message: z.string().describe('消息文本，纯文本，不要用 Markdown 或 CQ 码'),
@@ -567,7 +567,7 @@ server.tool(
 
 // ── 二代仿真模式（reserved2）工具 ─────────────────────────────────────────
 server.tool(
-  'qq_get_prompt',
+  'chat_get_prompt',
   '查看当前二代仿真模式的提示词/角色/推荐值/可用工具/当前唤醒配置（只读）。',
   { key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'), token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）') },
   async ({ key, token }) => {
@@ -581,7 +581,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_get_unread_messages',
+  'chat_get_unread_messages',
   '查看未读消息，不自动标记已读。大量积压或快照 partial=true 时，用 afterSeq=readThroughSeq 从水位后按时间顺序补读；从最早未读开始传 0。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -600,7 +600,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_get_recent_messages',
+  'chat_get_recent_messages',
   '查看指定会话的最近消息（只读），支持 offset 扩大范围。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -619,7 +619,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_social_state',
+  'chat_social_state',
   '查看指定会话的二代仿真状态：WakeConfig、未读数、上次唤醒原因、上次发言时间等（只读）。',
   { key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'), token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）') },
   async ({ key, token }) => {
@@ -633,8 +633,8 @@ server.tool(
 );
 
 server.tool(
-  'qq_mark_read',
-  '将指定会话已查看的未读消息标记为已读。throughSeq 使用最近读取结果的 readThroughSeq，避免清除读取后才到达的新消息；省略 throughSeq 会按旧行为清空当前全部未读，因此推荐始终带上水位。注意：每次设置潜水/下一次唤醒前，桥接要求先用 qq_wait_for_messages(timeoutMs=300000) 完成一次沉睡前观察：5 分钟内没人说话可 mark_read 收尾沉睡；期间有人发新消息则先查看 newMessages，判断不需要你参与也可直接 mark_read 收尾；若你参与了回复，则下次想睡需重新等待观察窗口。',
+  'chat_mark_read',
+  '将指定会话已查看的未读消息标记为已读。throughSeq 使用最近读取结果的 readThroughSeq，避免清除读取后才到达的新消息；省略 throughSeq 会按旧行为清空当前全部未读，因此推荐始终带上水位。注意：每次设置潜水/下一次唤醒前，桥接要求先用 chat_wait_for_messages(timeoutMs=300000) 完成一次沉睡前观察：5 分钟内没人说话可 mark_read 收尾沉睡；期间有人发新消息则先查看 newMessages，判断不需要你参与也可直接 mark_read 收尾；若你参与了回复，则下次想睡需重新等待观察窗口。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
@@ -651,12 +651,12 @@ server.tool(
 );
 
 server.tool(
-  'qq_set_wake_config',
-  '设置指定会话的二代唤醒配置：mode/无限期或有限时间/提前唤醒条件（@、名字、关键词、提问、拍一拍、概率、anyMessage、指定成员）。triggers.speakerIds 是可选的“指定群友发言唤醒”：填一个或多个群友 QQ 号后，只要其中任意一位在群里发言就会唤醒你；不设置则不启用。适合在等某个人回复、或某人反应慢怕错过时使用。triggers.poke 开启后，群里有人拍一拍（包括拍你或拍别人）会唤醒你。注意：每次设置潜水/下一次唤醒前需先用 qq_wait_for_messages(timeoutMs=300000) 完成一次沉睡前观察：5 分钟内没人说话可设置并沉睡；期间有人发新消息则先查看 newMessages，判断不需要你参与可直接设置并沉睡；若你参与了回复，则下次想睡需重新等待观察窗口。',
+  'chat_set_wake_config',
+  '设置指定会话的二代唤醒配置：mode/无限期或有限时间/提前唤醒条件（@、名字、关键词、提问、拍一拍、概率、anyMessage、指定成员）。triggers.speakerIds 是可选的“指定群友发言唤醒”：填一个或多个群友 QQ 号后，只要其中任意一位在群里发言就会唤醒你；不设置则不启用。适合在等某个人回复、或某人反应慢怕错过时使用。triggers.poke 开启后，群里有人拍一拍（包括拍你或拍别人）会唤醒你。注意：每次设置潜水/下一次唤醒前需先用 chat_wait_for_messages(timeoutMs=300000) 完成一次沉睡前观察：5 分钟内没人说话可设置并沉睡；期间有人发新消息则先查看 newMessages，判断不需要你参与可直接设置并沉睡；若你参与了回复，则下次想睡需重新等待观察窗口。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-    throughSeq: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional().describe('可同时确认已读：使用已查看结果中的 readThroughSeq，省去额外 qq_mark_read；不传则只设置唤醒配置。若 markRead 工具被关闭，该水位会被忽略，本工具只设置唤醒配置'),
+    throughSeq: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional().describe('可同时确认已读：使用已查看结果中的 readThroughSeq，省去额外 chat_mark_read；不传则只设置唤醒配置。若 markRead 工具被关闭，该水位会被忽略，本工具只设置唤醒配置'),
     config: z.object({
       mode: z.enum(['diving', 'active']).optional().describe('diving=潜水，active=活跃（anyMessage 开启）'),
       infinite: z.boolean().optional().describe('true=无限期，只有条件命中才唤醒；false=有限时间'),
@@ -665,7 +665,7 @@ server.tool(
       triggers: z.object({
         atMention: z.boolean().optional().describe('被 @ 或引用自己时唤醒'),
         nameMention: z.boolean().optional().describe('被叫名字/昵称时唤醒'),
-        speakerIds: z.array(z.union([z.number(), z.string()])).max(20).optional().describe('指定群友 QQ 号数组：这些群友中任意一位发言时唤醒（可选，最多 20 个，不设置则不启用；私聊不适用，设置会被桥接清除；可从 qq_get_active_members / qq_get_group_members / qq_get_message_detail 的 userId/user_id 获取）'),
+        speakerIds: z.array(z.union([z.number(), z.string()])).max(20).optional().describe('指定群友 QQ 号数组：这些群友中任意一位发言时唤醒（可选，最多 20 个，不设置则不启用；私聊不适用，设置会被桥接清除；可从 chat_get_active_members / chat_get_group_members / chat_get_message_detail 的 userId/user_id 获取）'),
         keywords: z.array(z.string()).optional().describe('出现任意关键词时唤醒'),
         question: z.boolean().optional().describe('被直接提问/点名挑战时唤醒'),
         poke: z.boolean().optional().describe('有人拍一拍时唤醒（群聊包括拍你和拍别人，私聊为对方拍你）'),
@@ -686,8 +686,8 @@ server.tool(
 );
 
 server.tool(
-  'qq_send_burst',
-  '在指定 QQ 群分多条发送消息（二代仿真模式专用），桥接会按真人化随机间隔发送。暂不支持引用，需要引用请用 qq_reply。注意：数组里的每个字符串就是一条 QQ 消息，字符串内部不要用空格分隔中文短句，需要多条请用数组元素；每条消息要读起来完整，不要把同一句话拆到两条里。',
+  'chat_send_burst',
+  '在指定 QQ 群分多条发送消息（二代仿真模式专用），桥接会按真人化随机间隔发送。暂不支持引用，需要引用请用 chat_reply。注意：数组里的每个字符串就是一条 QQ 消息，字符串内部不要用空格分隔中文短句，需要多条请用数组元素；每条消息要读起来完整，不要把同一句话拆到两条里。',
   {
     groupId: z.union([z.number(), z.string()]).describe('群号（必须在白名单内）'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
@@ -728,7 +728,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_send_message',
+  'chat_send_message',
   '统一发送工具：可发一条或多条，可引用某条消息，可自定义/按字数计算条间时间差。二代仿真模式专用。注意：字符串=一条消息，数组=多条消息；每个字符串内部不要用空格分隔中文短句，需要多条请用数组元素；每条消息要读起来完整，不要把同一句话拆到两条里。只有以下情况才需要传 replyToMessageId 引用：① 你这条消息指向的人或消息并非最新一条别人的消息（也就是你在回更早的某条）；② 你连续几句话里不同消息指代的是不同的消息或不同的人。其他情况（上下文唯一、刚在接同一条最新消息）不要引用，别让对方猜，也别为了用工具而用。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -775,8 +775,8 @@ server.tool(
 
 if (cfg.socialV2?.tools?.sendPoke !== false) {
   server.tool(
-    'qq_send_poke',
-    '发送 QQ 拍一拍（群聊/私聊）。适合用“戳一下”代替一句废话、提醒对方、自然回应别人的拍一拍，或偶尔主动戳一下正在聊的人/熟人——这样更拟真；但别频繁，真人不会一直戳人。群聊必须传 targetUserId（要拍的群友 QQ 号，可从 qq_get_active_members / qq_get_message_detail 的 userId 获取）；私聊可不传 targetUserId（默认拍当前私聊对象）。reserved2 下必须携带会话令牌 token，发送会受桥接白名单与发送频率限制。',
+    'chat_send_poke',
+    '发送 QQ 拍一拍（群聊/私聊）。适合用“戳一下”代替一句废话、提醒对方、自然回应别人的拍一拍，或偶尔主动戳一下正在聊的人/熟人——这样更拟真；但别频繁，真人不会一直戳人。群聊必须传 targetUserId（要拍的群友 QQ 号，可从 chat_get_active_members / chat_get_message_detail 的 userId 获取）；私聊可不传 targetUserId（默认拍当前私聊对象）。reserved2 下必须携带会话令牌 token，发送会受桥接白名单与发送频率限制。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
@@ -799,7 +799,7 @@ if (cfg.socialV2?.tools?.sendPoke !== false) {
 }
 
 server.tool(
-  'qq_wait_for_messages',
+  'chat_wait_for_messages',
   '等待分两种用途。首答前已读消息、只想确认有没有补充：用 purpose="reply"，按最后来信时间补足 quietMs 静默，已安静足够就立即返回；读取/思考时新到的消息也会返回，新消息重算静默。timeoutMs 是最长预算，不要求等满；预算到但 quiet=false 不代表对方已说完。此用途绝不代替沉睡前观察。等对方继续说、等回复或睡前观察：用默认 purpose="messages"；先等新消息，收到后才按 quietMs 等静默，没有新消息会等到 timeoutMs，单传 quietMs 不会缩短总等待。静默下限由后台配置，默认 10000ms。**返回里的 canSleepNow / countsAsObservation / hint 直接告诉你现在能不能收尾、该用多大的 timeoutMs——照它做，不要反复试**：canSleepNow=true 就可以直接 mark_read / set_wake_config；false 时按 hint 给的 timeoutMs 一次等满（更短的等待不算沉睡前观察，满足不了闸门）。直接看 newMessages、unreadCount 和 readThroughSeq，返回消息无需重复查询；仍有未展示未读才补读。决定潜水/收尾时才用默认用途加 timeoutMs=300000 完成沉睡前观察，不能把 5 分钟观察放在首答之前；短等待不能代替。全程无人说话返回 preSleepWaitSatisfied=true；观察期间来了新消息返回 preSleepWaitObserved=true，读后不需参与可收尾，参与回复则下次收尾重新观察。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -827,7 +827,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_report_feedback',
+  'chat_report_feedback',
   '向控制台/管理端反馈 AI 遇到的问题、困惑或需要管理员介入的情况。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -850,7 +850,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_get_my_recent_messages',
+  'chat_get_my_recent_messages',
   '查看自己最近发过的消息（只读），避免重复/保持人设。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -868,7 +868,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_get_message_detail',
+  'chat_get_message_detail',
   '按 message_id / 本地 seq 查看单条消息的发送者、引用信息与正文（只读）。注意：正文最多返回 200 字符，textTruncated=true 表示被截断，这里不是读取长消息全文的入口。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -886,7 +886,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_get_active_members',
+  'chat_get_active_members',
   '查看最近活跃成员列表（只读），帮助判断话题参与者。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -904,8 +904,8 @@ server.tool(
 );
 
 server.tool(
-  'qq_memory_append',
-  '记录一条轻量记忆：activeTopic=进行中的话题；pendingThought=你想说但还没说的话；memberImpression=对某位群友的印象。记忆会持久化，并在后续唤醒/qq_get_prompt 中自动出现。',
+  'chat_memory_append',
+  '记录一条轻量记忆：activeTopic=进行中的话题；pendingThought=你想说但还没说的话；memberImpression=对某位群友的印象。记忆会持久化，并在后续唤醒/chat_get_prompt 中自动出现。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
@@ -934,7 +934,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_memory_query',
+  'chat_memory_query',
   '查看当前会话的轻量记忆：进行中的话题、你想说但还没说的话、对群友的印象（只读）。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -954,7 +954,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_memory_remove',
+  'chat_memory_remove',
   '删除一条轻量记忆：activeTopic/pendingThought 用 content 匹配原文删除；memberImpression 用 target 参数指定群友名字删除。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -978,7 +978,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_memory_clear',
+  'chat_memory_clear',
   '清空轻量记忆：不传 category 清空全部；传 activeTopic/pendingThought/memberImpression 只清空对应类别。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -1000,7 +1000,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_slang_query',
+  'chat_slang_query',
   '查看当前已确认的群聊黑话/梗/网络表达（只读）。返回已确认词条列表和格式化黑话表；遇到不熟悉的词可先查这里，再决定是否搜索/使用。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -1019,7 +1019,7 @@ server.tool(
 );
 
 server.tool(
-  'qq_slang_submit',
+  'chat_slang_submit',
   '把你在群里经常看到但不确定含义/用法的陌生词、黑话、梗或网络表达提交给管理员筛选。提交后进入候选库，管理员确认后会被写入黑话提示词，成为你后续可查询和使用的记忆。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -1044,7 +1044,7 @@ server.tool(
 // ── 图片/表情查看工具（一代/二代仿真共用） ─────────────────────────────────
 if (cfg.socialV2?.tools?.getImages !== false) {
   server.tool(
-    'qq_get_message_images',
+    'chat_get_message_images',
     '获取指定 QQ 消息中的图片/表情，并直接以图像内容返回给模型（视觉模型可“看懂”）。当消息文本里出现 [图片]、[表情] 或 hasMedia=true 时调用。支持一条消息里的多张图片/表情；二代模式下必须携带会话令牌。**动图（GIF/动态表情）会被桥接抽帧拼成多格图再给你**：说明里会写「动图 N 帧/…s，已抽 X 帧拼成 A×B 网格，行优先 左上→右下」——按格子顺序理解动作即可，不要把它当成一张九宫格照片；没有这类说明就是静态图。体积过大的图会被自动缩放/重编码，说明里会给出原始尺寸与体积；如果真的压不到可用体积，返回里会直接写明原因（例如「超过上限」），此时如实告诉对方你看不到，不要编造画面。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -1086,8 +1086,8 @@ if (cfg.socialV2?.tools?.getImages !== false) {
 // ── 表情包体系工具（二代仿真模式） ─────────────────────────────────────────
 if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.listStickers !== false) {
   server.tool(
-    'qq_list_stickers',
-    '查看 QQ 账号上已收藏的表情包（自定义表情）列表：包含 emoji_id、备注 desc、本地笔记 localNote、标签 tags、使用次数等。可通过 query 按备注/笔记/标签搜索；无备注的表情可以先调用 qq_get_sticker_image 看图理解，再用 qq_sticker_note 记下含义。刚新增/删除表情后如需立即同步，请传 refresh=true。',
+    'chat_list_stickers',
+    '查看 QQ 账号上已收藏的表情包（自定义表情）列表：包含 emoji_id、备注 desc、本地笔记 localNote、标签 tags、使用次数等。可通过 query 按备注/笔记/标签搜索；无备注的表情可以先调用 chat_get_sticker_image 看图理解，再用 chat_sticker_note 记下含义。刚新增/删除表情后如需立即同步，请传 refresh=true。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
@@ -1115,12 +1115,12 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.listSticker
 
 if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.getStickerImage !== false) {
   server.tool(
-    'qq_get_sticker_image',
-    '获取指定收藏表情的图片内容并直接以图像返回给模型（视觉模型可“看懂”）。当 qq_list_stickers 返回的表情 desc/localNote 为空、或你想确认表情实际长什么样时调用。stickerId 可用 qq_list_stickers 返回的 id / md5 / url。动图表情会被抽帧拼成多格图（行优先：左上→右下），说明里会写帧数与网格尺寸；体积过大时会自动缩放，说明里会给出原始尺寸。',
+    'chat_get_sticker_image',
+    '获取指定收藏表情的图片内容并直接以图像返回给模型（视觉模型可“看懂”）。当 chat_list_stickers 返回的表情 desc/localNote 为空、或你想确认表情实际长什么样时调用。stickerId 可用 chat_list_stickers 返回的 id / md5 / url。动图表情会被抽帧拼成多格图（行优先：左上→右下），说明里会写帧数与网格尺寸；体积过大时会自动缩放，说明里会给出原始尺寸。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-      stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 qq_list_stickers）')
+      stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 chat_list_stickers）')
     },
     async ({ key, token, stickerId }) => {
       try {
@@ -1143,12 +1143,12 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.getStickerI
 
 if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.sendSticker !== false) {
   server.tool(
-    'qq_send_sticker',
-    '在指定会话发送一个 QQ 收藏表情包（自定义表情）。stickerId 用 qq_list_stickers 返回的 id / md5 / url。注意：一条消息只能是一张表情，不能在同一气泡里附带文字；想说的话请先用 qq_send_message / qq_reply 作为单独气泡发送，再单独发这张表情。需要引用/点名时可用 replyToMessageId / atUserId（群聊）。真人偶尔用表情包很自然，但别刷屏。',
+    'chat_send_sticker',
+    '在指定会话发送一个 QQ 收藏表情包（自定义表情）。stickerId 用 chat_list_stickers 返回的 id / md5 / url。注意：一条消息只能是一张表情，不能在同一气泡里附带文字；想说的话请先用 chat_send_message / chat_reply 作为单独气泡发送，再单独发这张表情。需要引用/点名时可用 replyToMessageId / atUserId（群聊）。真人偶尔用表情包很自然，但别刷屏。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-      stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 qq_list_stickers）'),
+      stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 chat_list_stickers）'),
       replyToMessageId: z.union([z.number(), z.string()]).optional().describe('要引用/回复的消息 id（非零整数，可为负数，可选）'),
       atUserId: z.union([z.number(), z.string()]).optional().describe('要 @ 的群成员 QQ 号（群聊中可选，私聊不可用）')
     },
@@ -1170,12 +1170,12 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.sendSticker
 
 if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.collectSticker !== false) {
   server.tool(
-    'qq_collect_sticker',
-    '收藏当前会话里别人发的一张表情/图片到你的 QQ 收藏表情，并可写一句简短备注（如“好图偷了，兄弟”）。messageId 用 qq_get_unread_messages / qq_get_recent_messages 返回的 messageId 或 seq。注意：不要频繁收藏，只在真的觉得有意思/好用/戳中你时才偷图；收藏后你可以在 qq_list_stickers 里看到并继续使用。',
+    'chat_collect_sticker',
+    '收藏当前会话里别人发的一张表情/图片到你的 QQ 收藏表情，并可写一句简短备注（如“好图偷了，兄弟”）。messageId 用 chat_get_unread_messages / chat_get_recent_messages 返回的 messageId 或 seq。注意：不要频繁收藏，只在真的觉得有意思/好用/戳中你时才偷图；收藏后你可以在 chat_list_stickers 里看到并继续使用。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-      messageId: z.string().describe('要收藏的那条消息的 messageId 或 seq（来自 qq_get_unread_messages / qq_get_recent_messages）'),
+      messageId: z.string().describe('要收藏的那条消息的 messageId 或 seq（来自 chat_get_unread_messages / chat_get_recent_messages）'),
       remark: z.string().optional().describe('简短备注，最多 20 字，例如“好图偷了，兄弟”')
     },
     async ({ key, token, messageId, remark }) => {
@@ -1196,12 +1196,12 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.collectStic
 
 if (cfg.socialV2?.voice?.enabled !== false && cfg.socialV2?.tools?.sendVoice !== false) {
   server.tool(
-    'qq_send_voice',
-    '在指定会话发一条 QQ 语音（把语音库里准备好的音频当语音条发出去）。voice 传 qq_list_voices 返回的 name（文件名，可带子目录），也可以直接传语音库里的文件名（不带扩展名也能匹配）。注意：① 只能发语音库（qq-bridge/audio/）里的文件，不能发任意本地路径，也不能发 URL/base64；② 受时长与频率上限约束（见 qq_list_voices 的 limits），超限会被拒绝；③ 语音是「开口说话」的强表达，别滥用，闲聊里偶尔发一条即可；④ 返回的 verified=true 表示已经用 get_msg 回读到这条消息的 record 段（语音确实落地了）—— 只有 verified=true 才能对用户说你发了语音；⑤ readback 只对「收到的」语音有意义（QQ 会转写别人的语音），自己发的语音一般拿不到转写文本，默认关闭，别依赖它。',
+    'chat_send_voice',
+    '在指定会话发一条 QQ 语音（把语音库里准备好的音频当语音条发出去）。voice 传 chat_list_voices 返回的 name（文件名，可带子目录），也可以直接传语音库里的文件名（不带扩展名也能匹配）。注意：① 只能发语音库（qq-bridge/audio/）里的文件，不能发任意本地路径，也不能发 URL/base64；② 受时长与频率上限约束（见 chat_list_voices 的 limits），超限会被拒绝；③ 语音是「开口说话」的强表达，别滥用，闲聊里偶尔发一条即可；④ 返回的 verified=true 表示已经用 get_msg 回读到这条消息的 record 段（语音确实落地了）—— 只有 verified=true 才能对用户说你发了语音；⑤ readback 只对「收到的」语音有意义（QQ 会转写别人的语音），自己发的语音一般拿不到转写文本，默认关闭，别依赖它。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-      voice: z.string().describe('语音库里的文件名（来自 qq_list_voices 的 name，可带子目录/可省略扩展名）'),
+      voice: z.string().describe('语音库里的文件名（来自 chat_list_voices 的 name，可带子目录/可省略扩展名）'),
       label: z.string().optional().describe('可选：写进会话记录里的说明，如「说了句晚安」'),
       verify: z.boolean().optional().describe('是否回读校验语音已落地（默认 true，建议保持开启）'),
       readback: z.boolean().optional().describe('是否额外索取 QQ 转写文本（自己发的语音通常没有，默认 false）')
@@ -1229,7 +1229,7 @@ if (cfg.socialV2?.voice?.enabled !== false && cfg.socialV2?.tools?.sendVoice !==
   );
 
   server.tool(
-    'qq_list_voices',
+    'chat_list_voices',
     '查看可用的语音库（qq-bridge 的 audio 目录里准备好的音频文件）：文件名、时长、大小。想发语音前先调用这个看有哪些能发（名字用返回的 name）。返回里 limits 是时长/体积/频率上限。语音库里没有合适内容时不要硬发，也不要假装发了语音。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -1251,7 +1251,7 @@ if (cfg.socialV2?.voice?.enabled !== false && cfg.socialV2?.tools?.sendVoice !==
 
 if (cfg.socialV2?.tools?.getSelfImage !== false) {
   server.tool(
-    'qq_get_self_image',
+    'chat_get_self_image',
     '查看你自己的默认 Q 版形象图片（DeepSeek 小鲸鱼形象）。当你被问“你长什么样/发张自拍/你是什么形象”时，可以调用这个工具看自己的样子；返回的图片会直接进入你的视觉上下文。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
@@ -1279,12 +1279,12 @@ if (cfg.socialV2?.tools?.getSelfImage !== false) {
 
 if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.stickerNote !== false) {
   server.tool(
-    'qq_sticker_note',
+    'chat_sticker_note',
     '给一个收藏表情记录你自己的理解/备注/标签/用法，供以后选择表情时参考。这是本地记忆，不会修改 QQ 账号的官方备注；适合对没有备注的表情看图后记住含义。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-      stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 qq_list_stickers）'),
+      stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 chat_list_stickers）'),
       note: z.string().optional().describe('你理解的表情含义/适合场景，最多 200 字'),
       tags: z.array(z.string()).optional().describe('可选标签，如 ["嘲讽","笑哭","怼人"]'),
       usage: z.string().optional().describe('可选用法说明，最多 200 字')
@@ -1310,12 +1310,12 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.stickerNote
 
 if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.setStickerRemark !== false) {
   server.tool(
-    'qq_set_sticker_remark',
-    '修改 QQ 账号里收藏表情的官方备注（desc）。这是写操作，会直接影响 QQ 账号的表情备注；仅在管理员明确允许（socialV2.tools.setStickerRemark=true）时可用。一般优先用 qq_sticker_note 记录自己的理解，不要随意改官方备注。',
+    'chat_set_sticker_remark',
+    '修改 QQ 账号里收藏表情的官方备注（desc）。这是写操作，会直接影响 QQ 账号的表情备注；仅在管理员明确允许（socialV2.tools.setStickerRemark=true）时可用。一般优先用 chat_sticker_note 记录自己的理解，不要随意改官方备注。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-      stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 qq_list_stickers）'),
+      stickerId: z.string().describe('表情标识：emoji_id / md5 / 图片 URL（来自 chat_list_stickers）'),
       remark: z.string().describe('新的表情备注，最多 50 字')
     },
     async ({ key, token, stickerId, remark }) => {
@@ -1336,8 +1336,8 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.setStickerR
 // ── 合并转发消息查看工具（二代仿真模式） ────────────────────────────────────
 if (cfg.socialV2?.tools?.getForwardMsg !== false) {
   server.tool(
-    'qq_get_forward_msg',
-    '查看当前会话中出现的合并转发消息/聊天记录内容（只读）。当消息文本里出现 `[转发消息 id=...]`，或 `qq_get_unread_messages` / `qq_get_recent_messages` / `qq_get_message_detail` 返回的某条消息带 `forwardIds` / `hasForward: true` 时调用。只能查看当前会话确实收到过的转发消息 id，不能任意读取。返回内容会包含每条消息的 text、media（图片/表情元数据）与 nestedForwardIds；如果合并转发里有图片，工具会直接把最多 5 张图片以图像内容返回给视觉模型；如果里面有嵌套合并转发，会附带嵌套转发 id 和前几条预览，必要时可继续用本工具查看嵌套 id。',
+    'chat_get_forward_msg',
+    '查看当前会话中出现的合并转发消息/聊天记录内容（只读）。当消息文本里出现 `[转发消息 id=...]`，或 `chat_get_unread_messages` / `chat_get_recent_messages` / `chat_get_message_detail` 返回的某条消息带 `forwardIds` / `hasForward: true` 时调用。只能查看当前会话确实收到过的转发消息 id，不能任意读取。返回内容会包含每条消息的 text、media（图片/表情元数据）与 nestedForwardIds；如果合并转发里有图片，工具会直接把最多 5 张图片以图像内容返回给视觉模型；如果里面有嵌套合并转发，会附带嵌套转发 id 和前几条预览，必要时可继续用本工具查看嵌套 id。',
     {
       key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
       token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),

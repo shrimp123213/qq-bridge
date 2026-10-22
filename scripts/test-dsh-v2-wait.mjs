@@ -1,5 +1,5 @@
 // 二代等待逻辑的「实时」端到端测试：真建一个 qq-chat-v2 会话并向 DSH 提问，
-// 断言 qq_wait_for_messages 出现在该 preset 的可用工具面里。需要 DSH 正在运行。
+// 断言 chat_wait_for_messages 出现在该 preset 的可用工具面里。需要 DSH 正在运行。
 // （纯逻辑单测见 scripts/test-v2-wait.mjs，两者不重复。）
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -61,8 +61,8 @@ async function main() {
   console.log('TOOLS_TEXT_START');
   console.log(text.slice(0, 3000));
   console.log('TOOLS_TEXT_END');
-  const hasWait = text.includes('qq_wait_for_messages');
-  console.log('HAS_qq_wait_for_messages=' + hasWait);
+  const hasWait = text.includes('chat_wait_for_messages');
+  console.log('HAS_chat_wait_for_messages=' + hasWait);
   console.log('RESULT=' + (hasWait ? 'WAIT_TOOL_VISIBLE' : 'CHECK_FAILED'));
 }
 

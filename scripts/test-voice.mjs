@@ -142,13 +142,13 @@ console.log('## 配置项（AI 发语音默认关闭，等语音库准备好再�
 console.log('## MCP 工具与 bridge 路由');
 {
   const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
-  ok(mcp.includes("'qq_send_voice'"), 'MCP 注册 qq_send_voice');
-  ok(mcp.includes("'qq_list_voices'"), 'MCP 注册 qq_list_voices');
-  ok(mcp.includes("qq_send_voice: 'sendVoice'"), 'qq_send_voice 受 sendVoice 开关控制');
-  ok(mcp.includes("qq_list_voices: 'sendVoice'"), 'qq_list_voices 受 sendVoice 开关控制');
-  const voiceBlock = mcp.slice(mcp.indexOf("'qq_send_voice'"), mcp.indexOf("'qq_list_voices'"));
-  ok(voiceBlock.includes('/api/socialV2/send-voice'), 'qq_send_voice 调 /api/socialV2/send-voice');
-  ok(!voiceBlock.includes("绝对路径的音频"), 'qq_send_voice 不暴露绝对路径参数');
+  ok(mcp.includes("'chat_send_voice'"), 'MCP 注册 chat_send_voice');
+  ok(mcp.includes("'chat_list_voices'"), 'MCP 注册 chat_list_voices');
+  ok(mcp.includes("chat_send_voice: 'sendVoice'"), 'chat_send_voice 受 sendVoice 开关控制');
+  ok(mcp.includes("chat_list_voices: 'sendVoice'"), 'chat_list_voices 受 sendVoice 开关控制');
+  const voiceBlock = mcp.slice(mcp.indexOf("'chat_send_voice'"), mcp.indexOf("'chat_list_voices'"));
+  ok(voiceBlock.includes('/api/socialV2/send-voice'), 'chat_send_voice 调 /api/socialV2/send-voice');
+  ok(!voiceBlock.includes("绝对路径的音频"), 'chat_send_voice 不暴露绝对路径参数');
 
   // record 段在平台适配层里构造，路由与函数在 bridge.js 里：两份一起查。
   const bridge = ['src/bridge.js', 'src/platform/qq-onebot.js']
@@ -200,8 +200,8 @@ if (!hasVoiceTool()) {
 console.log('## preset 人设已描述语音能力（否则 AI 不知道自己会说话）');
 {
   const preset = fs.readFileSync(path.join(ROOT, 'dsh', 'agent-presets', 'qq-chat-v2', 'agent.cordis.yml'), 'utf8');
-  ok(preset.includes('qq_send_voice'), 'qq-chat-v2 人设提到 qq_send_voice');
-  ok(preset.includes('qq_list_voices'), 'qq-chat-v2 人设提到 qq_list_voices');
+  ok(preset.includes('chat_send_voice'), 'qq-chat-v2 人设提到 chat_send_voice');
+  ok(preset.includes('chat_list_voices'), 'qq-chat-v2 人设提到 chat_list_voices');
   ok(preset.includes('verified=true'), '人设说明 verified=true 的语义');
   ok(/不要假装发了语音/.test(preset), '人设禁止假装发语音');
   // DSH 0.1.7 起守卫的权威实现只有一份，在 qq-agent-presets bundle 里

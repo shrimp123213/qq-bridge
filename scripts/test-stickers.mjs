@@ -71,7 +71,7 @@ console.log('## sticker-lib 纯函数');
   ok(q2.matched === 1 && q2.stickers[0].id === 'c', 'formatStickerList 按本地笔记搜索');
   const ctx = buildStickerContext(list, 8);
   ok(ctx.includes('笑死') && ctx.includes('生气'), 'buildStickerContext 包含备注');
-  ok(buildStickerStrategyHint().includes('qq_send_sticker'), '策略提示包含发送工具');
+  ok(buildStickerStrategyHint().includes('chat_send_sticker'), '策略提示包含发送工具');
 }
 
 {
@@ -100,9 +100,9 @@ console.log('## 配置文件');
 console.log('## 表情单气泡约束');
 {
   const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
-  const sendStickerBlock = mcp.slice(mcp.indexOf("'qq_send_sticker'"), mcp.indexOf("'qq_sticker_note'"));
-  ok(!sendStickerBlock.includes('message: z.string()'), 'qq_send_sticker MCP 不再接受 message 参数');
-  ok(sendStickerBlock.includes('不能在同一气泡里附带文字'), 'qq_send_sticker 描述强调单气泡');
+  const sendStickerBlock = mcp.slice(mcp.indexOf("'chat_send_sticker'"), mcp.indexOf("'chat_sticker_note'"));
+  ok(!sendStickerBlock.includes('message: z.string()'), 'chat_send_sticker MCP 不再接受 message 参数');
+  ok(sendStickerBlock.includes('不能在同一气泡里附带文字'), 'chat_send_sticker 描述强调单气泡');
   const hint = buildStickerStrategyHint();
   ok(hint.includes('不能在同一气泡里附带文字'), '策略提示禁止同气泡混文字');
   ok(!hint.includes('先发一句话再发一张'), '策略提示不再引导“先发一句话再发一张”');
@@ -111,7 +111,7 @@ console.log('## 表情单气泡约束');
 console.log('## MCP 工具描述存在性');
 {
   const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
-  for (const name of ['qq_list_stickers', 'qq_get_sticker_image', 'qq_send_sticker', 'qq_sticker_note', 'qq_set_sticker_remark']) {
+  for (const name of ['chat_list_stickers', 'chat_get_sticker_image', 'chat_send_sticker', 'chat_sticker_note', 'chat_set_sticker_remark']) {
     ok(mcp.includes(`'${name}'`) || mcp.includes(`"${name}"`), `MCP 工具 ${name} 已注册`);
   }
 }

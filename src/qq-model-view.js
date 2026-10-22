@@ -65,7 +65,7 @@ function compactMedia(media, canResolveByMessage) {
   return media.map((item, index) => {
     if (!isRecord(item)) return item;
     const result = { ...item };
-    // A local seq is a bridge message handle accepted by qq_get_message_images.
+    // A local seq is a bridge message handle accepted by chat_get_message_images.
     // Forwarded nodes only have messageSeq, and may not be locally resolvable:
     // keep their transport references, even when they happen to have messageId.
     if (canResolveByMessage) {

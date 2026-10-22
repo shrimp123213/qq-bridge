@@ -2,7 +2,7 @@
 //
 // 为什么要分模式：
 //   一代仿真（reserved）用空格分条、用 [SILENT] 表示沉默；
-//   二代仿真（reserved2）必须用工具发言（qq_send_message 的数组分条），没有 [SILENT]。
+//   二代仿真（reserved2）必须用工具发言（chat_send_message 的数组分条），没有 [SILENT]。
 //   同一张人格卡被两种模式共用时，一代专属指令会与二代工具协议冲突。
 // 以前靠 currentRoleHintV2() 对正文做「逐行猜测 + 正则过滤」，既容易误伤又说不清边界。
 //
